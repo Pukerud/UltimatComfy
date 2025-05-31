@@ -65,16 +65,17 @@ check_docker_status() {
 }
 
 build_comfyui_image() {
-    initialize_docker_paths
-    if [[ ! -f "$DOCKER_CONFIG_ACTUAL_PATH/Dockerfile" ]]; then
-        log_error "Dockerfile ikke funnet i $DOCKER_CONFIG_ACTUAL_PATH. Kjør installasjon (valg 1) først."
-        return 1
-    fi
+    # ... (initialisering) ...
 
     log_info "Starter bygging av Docker-image '$COMFYUI_IMAGE_NAME'..."
+    log_info "DEBUG FØR BUILD: DOCKER_CUDA_DEVEL_TAG er satt til: [$DOCKER_CUDA_DEVEL_TAG]"
+    log_info "DEBUG FØR BUILD: DOCKER_CUDA_RUNTIME_TAG er satt til: [$DOCKER_CUDA_RUNTIME_TAG]"
     log_info "Bruker devel tag: $DOCKER_CUDA_DEVEL_TAG"
     log_info "Bruker runtime tag: $DOCKER_CUDA_RUNTIME_TAG (VERIFISER AT DENNE ER GYLDIG PÅ NGC!)"
     log_info "Dette kan ta en stund."
+
+    log_info "TRYKK ENTER FOR Å STARTE BYGGING ETTER Å HA SETT DEBUG-INFO OVENFOR..."
+    press_enter_to_continue # <--- LEGG TIL DENNE PAUSEN
 
     if docker build -t "$COMFYUI_IMAGE_NAME" \
         --build-arg PASSED_CUDA_DEVEL_TAG="$DOCKER_CUDA_DEVEL_TAG" \
@@ -84,8 +85,16 @@ build_comfyui_image() {
         return 0
     else
         log_error "Bygging av Docker-image mislyktes."
+        # Også her kan en pause være nyttig for å se selve docker build feilmeldingen
+        log_error "FEIL UNDER DOCKER BUILD. TRYKK ENTER FOR Å GÅ TILBAKE TIL MENY."
+        press_enter_to_continue 
         return 1
     fi
+}
+```Husk at `press_enter_to_continue` er definert som:
+```bash
+press_enter_to_continue() {
+    read -r -p "Trykk Enter for å fortsette..." dummy_var_for_read </dev/tty
 }
 
 perform_docker_initial_setup() {
