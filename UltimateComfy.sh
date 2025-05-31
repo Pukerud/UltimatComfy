@@ -48,6 +48,33 @@ initialize_docker_paths() {
     DOCKER_SCRIPTS_ACTUAL_PATH="$BASE_DOCKER_SETUP_DIR/$SCRIPTS_DIR_NAME"
 }
 
+ensure_dialog_installed() {
+    if command -v dialog &>/dev/null; then
+        # log_info "Dialog utility is available." # Optional: for debugging
+        return 0 # Dialog is already installed
+    fi
+
+    log_warn "The 'dialog' utility is not installed. It is recommended for a better user interface."
+    local install_dialog_choice
+    read -r -p "Do you want to attempt to install 'dialog' using 'sudo apt-get install -y dialog'? (ja/nei): " install_dialog_choice </dev/tty
+
+    if [[ "$install_dialog_choice" =~ ^[Jj][Aa]$ ]]; then
+        log_info "Attempting to install 'dialog'..."
+        if sudo apt-get update && sudo apt-get install -y dialog; then
+            log_success "'dialog' installed successfully."
+            return 0
+        else
+            log_error "Failed to install 'dialog'. Please install it manually if you want the enhanced UI."
+            log_warn "Falling back to basic menu."
+            return 1
+        fi
+    else
+        log_info "Skipping 'dialog' installation."
+        log_warn "Falling back to basic menu."
+        return 1
+    fi
+}
+
 # --- Docker Oppsett Funksjoner ---
 check_docker_status() {
     if ! command -v docker &> /dev/null; then
@@ -86,9 +113,8 @@ build_comfyui_image() {
     DOCKER_BUILD_LOG_FILE="${DOCKER_CONFIG_ACTUAL_PATH}/docker_build_$(date +%Y%m%d_%H%M%S).log"
     log_info "Docker build output will be logged to: ${DOCKER_BUILD_LOG_FILE}"
 
-    log_warn "Attempting a --no-cache build for diagnostics." # Inform the user
     # Execute docker build and tee output to log file and screen
-    docker build --no-cache -t "$COMFYUI_IMAGE_NAME" \
+    docker build -t "$COMFYUI_IMAGE_NAME" \
         --build-arg "$build_arg_devel_str" \
         "$DOCKER_CONFIG_ACTUAL_PATH" 2>&1 | tee "${DOCKER_BUILD_LOG_FILE}"
 
@@ -162,8 +188,6 @@ perform_docker_initial_setup() {
     printf 'RUN %s\n' 'git clone https://github.com/comfyanonymous/ComfyUI.git'
     printf 'WORKDIR %s\n' '/app/ComfyUI'
     printf 'RUN %s\n' 'pip install --no-cache-dir -r requirements.txt'
-    printf 'RUN %s\n' 'git clone https://github.com/ltdrdata/ComfyUI-Manager.git ./custom_nodes/ComfyUI-Manager'
-    printf 'RUN %s\n' 'pip install --no-cache-dir -r ./custom_nodes/ComfyUI-Manager/requirements.txt'
     printf '\n'
     printf '%s\n' '# Stage 2: Runtime'
     # ARG for PASSED_CUDA_RUNTIME_TAG er fjernet. Taggen hardkodes i neste linje.
@@ -239,7 +263,12 @@ perform_docker_initial_setup() {
     echo "  - Start/stopp skript: $DOCKER_SCRIPTS_ACTUAL_PATH"
     log_warn "HUSK: Legg modeller i '$DOCKER_DATA_ACTUAL_PATH/models' og custom nodes i '$DOCKER_DATA_ACTUAL_PATH/custom_nodes'."
     
+    # Ensure error checking is not causing premature exit for the prompts below
     set +e 
+
+    # Call to install ComfyUI-Manager on host
+    install_comfyui_manager_on_host
+
     read -r -p "Vil du starte ComfyUI container(e) nå? (ja/nei): " start_now_choice </dev/tty
     if [[ "$start_now_choice" =~ ^[Jj][Aa]$ ]]; then
         if [[ -f "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh" ]]; then
@@ -252,6 +281,58 @@ perform_docker_initial_setup() {
     if [[ "$model_download_choice" =~ ^[Jj][Aa]$ ]]; then
         run_model_downloader "$DOCKER_DATA_ACTUAL_PATH" 
     fi
+}
+
+install_comfyui_manager_on_host() {
+    if [ -z "$DOCKER_DATA_ACTUAL_PATH" ]; then
+        initialize_docker_paths
+    fi
+
+    local target_custom_nodes_dir="${DOCKER_DATA_ACTUAL_PATH}/custom_nodes"
+    local manager_dir="${target_custom_nodes_dir}/ComfyUI-Manager"
+
+    log_info "Checking ComfyUI-Manager installation in host directory: $manager_dir"
+
+    if [ -d "$manager_dir" ]; then
+        read -r -p "ComfyUI-Manager already exists at $manager_dir. Reinstall? (ja/nei): " reinstall_choice </dev/tty
+        if [[ "$reinstall_choice" =~ ^[Jj][Aa]$ ]]; then
+            log_info "Removing existing ComfyUI-Manager for reinstall..."
+            if ! rm -rf "$manager_dir"; then
+                log_error "Failed to remove existing ComfyUI-Manager directory. Please check permissions."
+                return 1
+            fi
+            log_success "Existing ComfyUI-Manager removed."
+        else
+            log_info "Skipping ComfyUI-Manager installation."
+            # Display warning messages even if skipping re-installation but it exists
+            log_warn "IMPORTANT: ComfyUI-Manager is present at $manager_dir."
+            log_warn "Its Python dependencies may need to be installed *inside the running Docker container's environment*."
+            log_warn "After starting ComfyUI, you might need to run a command like:"
+            log_warn "  docker exec -it <your_container_name> pip install -r /app/ComfyUI/custom_nodes/ComfyUI-Manager/requirements.txt"
+            log_warn "Replace <your_container_name> with the actual name of your running ComfyUI container (e.g., comfyui-gpu0)."
+            return 0
+        fi
+    fi
+
+    # Proceed to clone if it doesn't exist or was just removed
+    if ! mkdir -p "$target_custom_nodes_dir"; then
+        log_error "Failed to create target directory $target_custom_nodes_dir. Please check permissions."
+        return 1
+    fi
+
+    log_info "Cloning ComfyUI-Manager to $manager_dir..."
+    if git clone https://github.com/ltdrdata/ComfyUI-Manager.git "$manager_dir"; then
+        log_success "ComfyUI-Manager cloned successfully to $manager_dir."
+        log_warn "IMPORTANT: ComfyUI-Manager has been cloned to $manager_dir."
+        log_warn "Its Python dependencies may need to be installed *inside the running Docker container's environment*."
+        log_warn "After starting ComfyUI, you might need to run a command like:"
+        log_warn "  docker exec -it <your_container_name> pip install -r /app/ComfyUI/custom_nodes/ComfyUI-Manager/requirements.txt"
+        log_warn "Replace <your_container_name> with the actual name of your running ComfyUI container (e.g., comfyui-gpu0)."
+    else
+        log_error "Failed to clone ComfyUI-Manager."
+        return 1
+    fi
+    return 0
 }
 
 # --- Model Downloader Funksjoner ---
@@ -465,30 +546,114 @@ run_model_downloader() {
 # --- Hovedmeny Funksjon ---
 main_menu() {
     initialize_docker_paths 
+
+    ensure_dialog_installed # Call the function to check/install dialog
+    local dialog_available=$? # Store its return status
+
+    local main_choice
+
     while true; do
-        clear
-        echo "--- ComfyUI Unified Tool (v4) ---" # Lagt til v4 her for enkel sjekk
-        echo "Primær oppsettsmappe: $BASE_DOCKER_SETUP_DIR"
-        echo "Docker image navn: $COMFYUI_IMAGE_NAME"
-        echo "--------------------------------"
-        echo "1) Førstegangs oppsett/Installer ComfyUI i Docker"
-        echo "2) Bygg/Oppdater ComfyUI Docker Image"
-        echo "3) Last ned/Administrer Modeller"
-        echo "4) Start ComfyUI Docker Container(e)"
-        echo "5) Stopp ComfyUI Docker Container(e)"
-        echo "6) Avslutt"
-        echo "--------------------------------"
-        local main_choice
-        read -r -p "Velg et alternativ: " main_choice </dev/tty
+        if [ "$dialog_available" -eq 0 ]; then
+            # Use dialog for menu
+            # Redirect stderr to a temporary file to check dialog's exit status properly
+            # as dialog itself writes selection to stderr if --stdout is not used.
+            # With --stdout, selection goes to stdout. Exit status $? indicates cancel.
+            main_choice=$(dialog --clear --stdout \
+                --title "ComfyUI Unified Tool (v4)" \
+                --ok-label "Select" \
+                --cancel-label "Exit" \
+                --menu "Base Dir: $BASE_DOCKER_SETUP_DIR
+Image: $COMFYUI_IMAGE_NAME
+
+Choose an option:" \
+                20 76 6 \
+                "1" "Førstegangs oppsett/Installer ComfyUI i Docker" \
+                "2" "Bygg/Oppdater ComfyUI Docker Image" \
+                "3" "Last ned/Administrer Modeller" \
+                "4" "Start ComfyUI Docker Container(e)" \
+                "5" "Stopp ComfyUI Docker Container(e)" \
+                "6" "Avslutt")
+
+            local dialog_exit_status=$?
+            if [ $dialog_exit_status -ne 0 ]; then # User pressed Esc or "Exit"
+                main_choice="6"
+            fi
+        else
+            # Fallback to basic menu
+            clear # Clear screen for the basic menu
+            echo "--- ComfyUI Unified Tool (v4) ---"
+            echo "Primær oppsettsmappe: $BASE_DOCKER_SETUP_DIR"
+            echo "Docker image navn: $COMFYUI_IMAGE_NAME"
+            echo "--------------------------------"
+            echo " (Dialog utility not found or install declined, using basic menu)"
+            echo "1) Førstegangs oppsett/Installer ComfyUI i Docker"
+            echo "2) Bygg/Oppdater ComfyUI Docker Image"
+            echo "3) Last ned/Administrer Modeller"
+            echo "4) Start ComfyUI Docker Container(e)"
+            echo "5) Stopp ComfyUI Docker Container(e)"
+            echo "6) Avslutt"
+            echo "--------------------------------"
+            read -r -p "Velg et alternativ (1-6): " main_choice </dev/tty
+        fi
+
         set +e 
         case "$main_choice" in
-            1) perform_docker_initial_setup ;;
-            2) if ! check_docker_status; then press_enter_to_continue; continue; fi; build_comfyui_image; press_enter_to_continue ;;
-            3) if [[ -d "$DOCKER_DATA_ACTUAL_PATH/models" ]]; then run_model_downloader "$DOCKER_DATA_ACTUAL_PATH"; else log_info "Docker data sti ikke funnet ($DOCKER_DATA_ACTUAL_PATH/models)."; log_info "Lar deg velge sti for modelldenedlasting manuelt."; run_model_downloader ""; fi ;; # Send tom streng hvis Docker-sti ikke finnes
-            4) if ! check_docker_status; then press_enter_to_continue; continue; fi; if [[ -f "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh" ]]; then "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"; else log_warn "Startskript ikke funnet. Kjør installasjon (valg 1) først."; fi; press_enter_to_continue ;;
-            5) if ! check_docker_status; then press_enter_to_continue; continue; fi; if [[ -f "$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh" ]]; then "$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"; else log_warn "Stoppskript ikke funnet."; fi; press_enter_to_continue ;;
-            6) log_info "Avslutter."; exit 0 ;;
-            *) log_warn "Ugyldig valg."; press_enter_to_continue ;;
+            "1")
+                perform_docker_initial_setup
+                press_enter_to_continue
+                ;;
+            "2")
+                if ! check_docker_status; then press_enter_to_continue; continue; fi
+                build_comfyui_image
+                press_enter_to_continue
+                ;;
+            "3")
+                # Ensure DOCKER_DATA_ACTUAL_PATH is set if this menu is somehow reached before Option 1
+                if [ -z "$DOCKER_DATA_ACTUAL_PATH" ]; then initialize_docker_paths; fi
+                if [[ -d "$DOCKER_DATA_ACTUAL_PATH/models" ]]; then
+                    run_model_downloader "$DOCKER_DATA_ACTUAL_PATH"
+                else
+                    log_info "Docker data sti ikke funnet ($DOCKER_DATA_ACTUAL_PATH/models)."
+                    log_info "Lar deg velge sti for modelldenedlasting manuelt."
+                    run_model_downloader ""
+                fi
+                press_enter_to_continue
+                ;;
+            "4")
+                if ! check_docker_status; then press_enter_to_continue; continue; fi
+                # Ensure DOCKER_SCRIPTS_ACTUAL_PATH is set
+                if [ -z "$DOCKER_SCRIPTS_ACTUAL_PATH" ]; then initialize_docker_paths; fi
+                if [[ -f "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh" ]]; then
+                    "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+                else
+                    log_warn "Startskript ikke funnet. Kjør installasjon (valg 1) først."
+                fi
+                press_enter_to_continue
+                ;;
+            "5")
+                if ! check_docker_status; then press_enter_to_continue; continue; fi
+                # Ensure DOCKER_SCRIPTS_ACTUAL_PATH is set
+                if [ -z "$DOCKER_SCRIPTS_ACTUAL_PATH" ]; then initialize_docker_paths; fi
+                if [[ -f "$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh" ]]; then
+                    "$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"
+                else
+                    log_warn "Stoppskript ikke funnet."
+                fi
+                press_enter_to_continue
+                ;;
+            "6")
+                log_info "Avslutter."
+                clear # Clear screen on exit
+                exit 0
+                ;;
+            *) # Invalid choice
+                if [ "$dialog_available" -eq 0 ]; then
+                    dialog --title "Ugyldig valg" --msgbox "Vennligst velg et gyldig alternativ fra menyen." 6 50
+                else
+                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-6."
+                fi
+                press_enter_to_continue
+                ;;
         esac
     done
 }
