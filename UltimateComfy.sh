@@ -1,7 +1,7 @@
 #!/bin/bash
 # Kombinert skript for ComfyUI Docker Oppsett og Modelldenedlasting
 
-# --- Globale Innstillinger og Konstanter ---
+# --- Globale Innstillinger og Konstanter  ---
 # Avslutt ved feil i kritiske deler (kan overstyres lokalt i funksjoner)
 # set -e
 
