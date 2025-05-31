@@ -70,16 +70,18 @@ check_docker_status() {
 build_comfyui_image() {
     initialize_docker_paths
     if [[ ! -f "$DOCKER_CONFIG_ACTUAL_PATH/Dockerfile" ]]; then
-        log_error "Dockerfile ikke funnet i $DOCKER_CONFIG_ACTUAL_PATH. Kjør installasjon (valg 1) først."
+        # ... feilmelding ...
         return 1
     fi
 
     log_info "Starter bygging av Docker-image '$COMFYUI_IMAGE_NAME'..."
-    log_info "Dette kan ta en stund."
+    # Definer tags her for klarhet
+    local base_tag="12.4.1-cudnn-devel-ubuntu22.04"
+    local runtime_tag="12.4.1-cudnn-runtime-ubuntu22.04" # Antatt, må kanskje sjekkes på NGC
+
     if docker build -t "$COMFYUI_IMAGE_NAME" \
-        --build-arg CUDA_VERSION="$CUDA_VERSION_ARG" \
-        --build-arg CUDNN_TAG="$CUDNN_TAG_ARG" \
-        --build-arg UBUNTU_VERSION="$UBUNTU_VERSION_ARG" \
+        --build-arg CUDA_BASE_IMAGE_TAG="$base_tag" \
+        --build-arg CUDA_RUNTIME_IMAGE_TAG="$runtime_tag" \
         "$DOCKER_CONFIG_ACTUAL_PATH"; then
         log_success "Docker-image '$COMFYUI_IMAGE_NAME' bygget/oppdatert vellykket."
         return 0
@@ -133,13 +135,13 @@ perform_docker_initial_setup() {
     done
     log_success "Katalogstruktur opprettet."
 
+        # ...
     log_info "Genererer Dockerfile..."
     cat <<EOF > "$DOCKER_CONFIG_ACTUAL_PATH/Dockerfile"
 # Stage 1: Builder
-ARG CUDA_VERSION=${CUDA_VERSION_ARG}
-ARG CUDNN_TAG=${CUDNN_TAG_ARG}
-ARG UBUNTU_VERSION=${UBUNTU_VERSION_ARG}
-FROM nvidia/cuda:\${CUDA_VERSION}-\${CUDNN_TAG}-devel-ubuntu\${UBUNTU_VERSION} AS builder
+ARG CUDA_BASE_IMAGE_TAG="12.4.1-cudnn-devel-ubuntu22.04" # Ny ARG for hele tag-slutten
+FROM nvcr.io/nvidia/cuda:\${CUDA_BASE_IMAGE_TAG} AS builder # Bruk den nye ARGen her
+
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends git python3-pip python3-venv ffmpeg curl && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv /opt/venv
@@ -152,7 +154,10 @@ RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git ./custom_nodes/Com
 RUN pip install --no-cache-dir -r ./custom_nodes/ComfyUI-Manager/requirements.txt
 
 # Stage 2: Runtime
-FROM nvidia/cuda:\${CUDA_VERSION}-\${CUDNN_TAG}-runtime-ubuntu\${UBUNTU_VERSION}
+# Vi må finne en korresponderende runtime-tag. Ofte er det bare å bytte -devel til -runtime
+ARG CUDA_RUNTIME_IMAGE_TAG="12.4.1-cudnn-runtime-ubuntu22.04" # Antatt runtime tag
+FROM nvcr.io/nvidia/cuda:\${CUDA_RUNTIME_IMAGE_TAG} AS runtime # Bruk den her
+
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends python3-pip ffmpeg curl libgl1 && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /opt/venv /opt/venv
@@ -167,6 +172,14 @@ EXPOSE 8188
 CMD ["python3", "main.py", "--max-upload-size", "1000", "--listen", "0.0.0.0", "--port", "8188", "--preview-method", "auto"]
 EOF
     log_success "Dockerfile generert."
+
+    # ... senere i build_comfyui_image funksjonen og perform_docker_initial_setup
+    # må du endre --build-arg:
+    # Fjern --build-arg CUDA_VERSION, --build-arg CUDNN_TAG, --build-arg UBUNTU_VERSION
+    # Legg til:
+    # --build-arg CUDA_BASE_IMAGE_TAG="12.4.1-cudnn-devel-ubuntu22.04" \
+    # --build-arg CUDA_RUNTIME_IMAGE_TAG="12.4.1-cudnn-runtime-ubuntu22.04" \
+    # Dette må gjøres i build_comfyui_image og i kallet til den fra perform_docker_initial_setup
 
     log_info "Genererer .dockerignore..."
     cat <<EOF > "$DOCKER_CONFIG_ACTUAL_PATH/.dockerignore"
