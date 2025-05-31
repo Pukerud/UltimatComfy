@@ -15,6 +15,7 @@ COMFYUI_IMAGE_NAME="comfyui-app"
 # Definer de komplette image tag-delene her for klarhet
 DOCKER_CUDA_DEVEL_TAG="12.4.1-cudnn-devel-ubuntu22.04"
 DOCKER_CUDA_RUNTIME_TAG="12.4.1-cudnn-runtime-ubuntu22.04"
+#12.4.1-cudnn-runtime-ubuntu22.04
 
 # For Model Downloader (MD)
 MD_SERVER_BASE_URL="http://192.168.1.29:8081/models/"
