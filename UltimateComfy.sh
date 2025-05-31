@@ -615,7 +615,8 @@ Choose an option:" \
                 "3" "Last ned/Administrer Modeller" \
                 "4" "Start ComfyUI Docker Container(e)" \
                 "5" "Stopp ComfyUI Docker Container(e)" \
-                "6" "Avslutt")
+                "6" "Avslutt" \
+                2>/dev/tty) # Added redirection here
 
             local dialog_exit_status=$?
             script_log "DEBUG: dialog command finished. main_choice='$main_choice', dialog_exit_status='$dialog_exit_status'"
