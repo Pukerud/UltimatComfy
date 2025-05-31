@@ -14,18 +14,19 @@ DOCKERFILES_DIR_NAME="docker_config"
 COMFYUI_DATA_DIR_NAME="comfyui_data"
 SCRIPTS_DIR_NAME="scripts"
 COMFYUI_IMAGE_NAME="comfyui-app"
-# Dockerfile ARGs (kan justeres her)
-CUDA_VERSION_ARG="12.4.1"
-CUDNN_TAG_ARG="cudnn8"
-UBUNTU_VERSION_ARG="22.04"
+
+# Definer de komplette image tag-delene her for klarhet
+# DU MÅ VERIFISERE DENNE RUNTIME-TAGGEN PÅ NVIDIA NGC!
+DOCKER_CUDA_DEVEL_TAG="12.4.1-cudnn-devel-ubuntu22.04"
+DOCKER_CUDA_RUNTIME_TAG="12.4.1-cudnn-runtime-ubuntu22.04" # <--- VERIFISER DENNE!
 
 # For Model Downloader (MD)
 MD_SERVER_BASE_URL="http://192.168.1.29:8081/models/"
 MD_PACKAGES_JSON_URL="http://192.168.1.29:8081/packages.json"
-MD_DEFAULT_COMFYUI_PATH_FALLBACK="$HOME/comfyui_docker_data" # Fra ditt opprinnelige skript
-MD_ADDITIONAL_COMFYUI_PATHS_FALLBACK=("/home/octa/AI/ComfyUI/") # Fra ditt opprinnelige skript
+MD_DEFAULT_COMFYUI_PATH_FALLBACK="$HOME/comfyui_docker_data"
+MD_ADDITIONAL_COMFYUI_PATHS_FALLBACK=("/home/octa/AI/ComfyUI/")
 
-# Dynamisk satte stier (vil bli satt av funksjoner)
+# Dynamisk satte stier
 DOCKER_CONFIG_ACTUAL_PATH=""
 DOCKER_DATA_ACTUAL_PATH=""
 DOCKER_SCRIPTS_ACTUAL_PATH=""
@@ -38,13 +39,12 @@ MD_COMFYUI_BASE_MODELS_PATH=""
 log_info() { echo -e "${BLUE}INFO:${NC} $1"; }
 log_success() { echo -e "${GREEN}SUCCESS:${NC} $1"; }
 log_warn() { echo -e "${YELLOW}WARN:${NC} $1"; }
-log_error() { echo -e "${RED}ERROR:${NC} $1" >&2; } # Ikke exit her, la kallende funksjon håndtere
+log_error() { echo -e "${RED}ERROR:${NC} $1" >&2; }
 
 press_enter_to_continue() {
-    read -r -p "Trykk Enter for å fortsette..."
+    read -r -p "Trykk Enter for å fortsette..." dummy_var_for_read </dev/tty
 }
 
-# Funksjon for å sette globale Docker-stier
 initialize_docker_paths() {
     DOCKER_CONFIG_ACTUAL_PATH="$BASE_DOCKER_SETUP_DIR/$DOCKERFILES_DIR_NAME"
     DOCKER_DATA_ACTUAL_PATH="$BASE_DOCKER_SETUP_DIR/$COMFYUI_DATA_DIR_NAME"
@@ -52,8 +52,6 @@ initialize_docker_paths() {
 }
 
 # --- Docker Oppsett Funksjoner ---
-
-# Sjekk om Docker er installert og kjører
 check_docker_status() {
     if ! command -v docker &> /dev/null; then
         log_error "Docker ser ikke ut til å være installert. Vennligst installer Docker og prøv igjen."
@@ -66,22 +64,21 @@ check_docker_status() {
     return 0
 }
 
-# Funksjon for å bygge Docker-imaget
 build_comfyui_image() {
     initialize_docker_paths
     if [[ ! -f "$DOCKER_CONFIG_ACTUAL_PATH/Dockerfile" ]]; then
-        # ... feilmelding ...
+        log_error "Dockerfile ikke funnet i $DOCKER_CONFIG_ACTUAL_PATH. Kjør installasjon (valg 1) først."
         return 1
     fi
 
     log_info "Starter bygging av Docker-image '$COMFYUI_IMAGE_NAME'..."
-    # Definer tags her for klarhet
-    local base_tag="12.4.1-cudnn-devel-ubuntu22.04"
-    local runtime_tag="12.4.1-cudnn-runtime-ubuntu22.04" # Antatt, må kanskje sjekkes på NGC
+    log_info "Bruker devel tag: $DOCKER_CUDA_DEVEL_TAG"
+    log_info "Bruker runtime tag: $DOCKER_CUDA_RUNTIME_TAG (VERIFISER AT DENNE ER GYLDIG PÅ NGC!)"
+    log_info "Dette kan ta en stund."
 
     if docker build -t "$COMFYUI_IMAGE_NAME" \
-        --build-arg CUDA_BASE_IMAGE_TAG="$base_tag" \
-        --build-arg CUDA_RUNTIME_IMAGE_TAG="$runtime_tag" \
+        --build-arg PASSED_CUDA_DEVEL_TAG="$DOCKER_CUDA_DEVEL_TAG" \
+        --build-arg PASSED_CUDA_RUNTIME_TAG="$DOCKER_CUDA_RUNTIME_TAG" \
         "$DOCKER_CONFIG_ACTUAL_PATH"; then
         log_success "Docker-image '$COMFYUI_IMAGE_NAME' bygget/oppdatert vellykket."
         return 0
@@ -100,7 +97,7 @@ perform_docker_initial_setup() {
 
     if [ -d "$BASE_DOCKER_SETUP_DIR" ]; then
         log_warn "Mappen '$BASE_DOCKER_SETUP_DIR' eksisterer allerede."
-        read -r -p "Vil du fortsette og potensielt overskrive konfigurasjonsfiler? (ja/nei): " overwrite_choice
+        read -r -p "Vil du fortsette og potensielt overskrive konfigurasjonsfiler? (ja/nei): " overwrite_choice </dev/tty
         if [[ ! "$overwrite_choice" =~ ^[Jj][Aa]$ ]]; then
             log_info "Oppsett avbrutt av bruker."
             set +e
@@ -110,7 +107,7 @@ perform_docker_initial_setup() {
 
     num_gpus=0
     while true; do
-        read -r -p "Hvor mange GPUer vil du sette opp ComfyUI for? (f.eks. 1 eller 2): " num_gpus_input
+        read -r -p "Hvor mange GPUer vil du sette opp ComfyUI for? (f.eks. 1 eller 2): " num_gpus_input </dev/tty
         if [[ "$num_gpus_input" =~ ^[1-9][0-9]*$ ]]; then
             num_gpus=$num_gpus_input
             break
@@ -135,12 +132,12 @@ perform_docker_initial_setup() {
     done
     log_success "Katalogstruktur opprettet."
 
-        # ...
     log_info "Genererer Dockerfile..."
     cat <<EOF > "$DOCKER_CONFIG_ACTUAL_PATH/Dockerfile"
 # Stage 1: Builder
-ARG CUDA_BASE_IMAGE_TAG="12.4.1-cudnn-devel-ubuntu22.04" # Ny ARG for hele tag-slutten
-FROM nvcr.io/nvidia/cuda:\${CUDA_BASE_IMAGE_TAG} AS builder # Bruk den nye ARGen her
+ARG PASSED_CUDA_DEVEL_TAG 
+# FROM nvcr.io/nvidia/cuda:\${PASSED_CUDA_DEVEL_TAG} AS builder # Gammel linje for referanse
+FROM nvcr.io/nvidia/cuda:\${PASSED_CUDA_DEVEL_TAG} AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends git python3-pip python3-venv ffmpeg curl && rm -rf /var/lib/apt/lists/*
@@ -154,9 +151,9 @@ RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git ./custom_nodes/Com
 RUN pip install --no-cache-dir -r ./custom_nodes/ComfyUI-Manager/requirements.txt
 
 # Stage 2: Runtime
-# Vi må finne en korresponderende runtime-tag. Ofte er det bare å bytte -devel til -runtime
-ARG CUDA_RUNTIME_IMAGE_TAG="12.4.1-cudnn-runtime-ubuntu22.04" # Antatt runtime tag
-FROM nvcr.io/nvidia/cuda:\${CUDA_RUNTIME_IMAGE_TAG} AS runtime # Bruk den her
+ARG PASSED_CUDA_RUNTIME_TAG
+# FROM nvcr.io/nvidia/cuda:\${PASSED_CUDA_RUNTIME_TAG} AS runtime # Gammel linje for referanse
+FROM nvcr.io/nvidia/cuda:\${PASSED_CUDA_RUNTIME_TAG} AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends python3-pip ffmpeg curl libgl1 && rm -rf /var/lib/apt/lists/*
@@ -166,37 +163,12 @@ WORKDIR /app/ComfyUI
 RUN mkdir -p ./models ./input ./output ./temp /cache/huggingface /cache/torch /cache/whisperx
 ENV HF_HOME="/cache/huggingface"
 ENV TORCH_HOME="/cache/torch"
-ENV WHISPERX_CACHE_DIR="/cache/whisperx"
+ENV WHISPERX_CACHE_DIR="/cache/whisperx" # Bekreft denne variabelen for WhisperX
 ENV PATH="/opt/venv/bin:\$PATH"
 EXPOSE 8188
 CMD ["python3", "main.py", "--max-upload-size", "1000", "--listen", "0.0.0.0", "--port", "8188", "--preview-method", "auto"]
 EOF
     log_success "Dockerfile generert."
-
-    # ... senere i build_comfyui_image funksjonen og perform_docker_initial_setup
-    # må du endre --build-arg:
-    # Fjern --build-arg CUDA_VERSION, --build-arg CUDNN_TAG, --build-arg UBUNTU_VERSION
-    # Legg til:
-    # --build-arg CUDA_BASE_IMAGE_TAG="12.4.1-cudnn-devel-ubuntu22.04" \
-    # --build-arg CUDA_RUNTIME_IMAGE_TAG="12.4.1-cudnn-runtime-ubuntu22.04" \
-    # Dette må gjøres i build_comfyui_image og i kallet til den fra perform_docker_initial_setup
-
-    log_info "Genererer .dockerignore..."
-    cat <<EOF > "$DOCKER_CONFIG_ACTUAL_PATH/.dockerignore"
-.git
-.vscode
-__pycache__
-*.pyc *.pyo *.pyd
-venv/
-ComfyUI/
-models/
-input/
-output/
-custom_nodes/
-temp/
-*.DS_Store
-EOF
-    log_success ".dockerignore generert."
 
     if ! build_comfyui_image; then
         log_error "Kunne ikke bygge Docker image. Oppsett ufullstendig."
@@ -251,7 +223,7 @@ EOF
     
     set +e # Gjenopprett normal feilhåndtering
 
-    read -r -p "Vil du starte ComfyUI container(e) nå? (ja/nei): " start_now_choice
+    read -r -p "Vil du starte ComfyUI container(e) nå? (ja/nei): " start_now_choice </dev/tty
     if [[ "$start_now_choice" =~ ^[Jj][Aa]$ ]]; then
         if [[ -f "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh" ]]; then
             "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
@@ -260,11 +232,12 @@ EOF
         fi
     fi
 
-    read -r -p "Vil du gå til modelldenedlastingsverktøyet nå? (ja/nei): " model_download_choice
+    read -r -p "Vil du gå til modelldenedlastingsverktøyet nå? (ja/nei): " model_download_choice </dev/tty
     if [[ "$model_download_choice" =~ ^[Jj][Aa]$ ]]; then
-        run_model_downloader "$DOCKER_DATA_ACTUAL_PATH" # Send med stien til data-mappen
+        run_model_downloader "$DOCKER_DATA_ACTUAL_PATH" 
     fi
 }
+
 # --- Model Downloader Funksjoner ---
 
 md_check_jq() {
@@ -277,27 +250,24 @@ md_check_jq() {
 }
 
 md_find_and_select_comfyui_path() {
-    local pre_selected_path_base="$1" # Dette er stien til /comfyui_data, ikke /comfyui_data/models
+    local pre_selected_path_base="$1" 
     local found_paths=()
     log_info "Søker etter ComfyUI-installasjoner for modelldenedlasting..."
 
-    # 0. Hvis en sti er forhåndsvalgt (fra Docker-oppsettet)
     if [[ -n "$pre_selected_path_base" ]] && [[ -d "$pre_selected_path_base/models" ]]; then
         log_info "Bruker forhåndsvalgt sti fra Docker-oppsett: $pre_selected_path_base"
         MD_COMFYUI_PATH="${pre_selected_path_base%/}"
         MD_COMFYUI_BASE_MODELS_PATH="$MD_COMFYUI_PATH/models"
-        # Tilby brukeren å endre hvis de ønsker
-        read -r -p "Vil du bruke denne stien ($MD_COMFYUI_PATH) for modeller, eller velge en annen? (Bruk denne/Velg annen) [B]: " use_preselected
+        read -r -p "Vil du bruke denne stien ($MD_COMFYUI_PATH) for modeller, eller velge en annen? (Bruk denne/Velg annen) [B]: " use_preselected </dev/tty
         if [[ "$use_preselected" =~ ^[Vv]$ ]]; then
-            MD_COMFYUI_PATH="" # Nullstill så vi går inn i manuell valg nedenfor
+            MD_COMFYUI_PATH="" 
             MD_COMFYUI_BASE_MODELS_PATH=""
         else
             log_success "Bruker $MD_COMFYUI_PATH for modelldenedlasting."
-            return 0 # Ferdig hvis brukeren aksepterer forhåndsvalgt sti
+            return 0 
         fi
     fi
 
-    # 1. Sjekk den definerte standardstien først (fallback)
     if [[ -n "$MD_DEFAULT_COMFYUI_PATH_FALLBACK" ]]; then
         local normalized_default_path="${MD_DEFAULT_COMFYUI_PATH_FALLBACK%/}"
         if [[ -d "$normalized_default_path" ]] && [[ -d "$normalized_default_path/models" ]]; then
@@ -307,7 +277,6 @@ md_find_and_select_comfyui_path() {
         fi
     fi
 
-    # 1b. Sjekk ytterligere forhåndsdefinerte stier (fallback)
     for additional_path_candidate in "${MD_ADDITIONAL_COMFYUI_PATHS_FALLBACK[@]}"; do
         if [[ -n "$additional_path_candidate" ]]; then
             local normalized_additional_path="${additional_path_candidate%/}"
@@ -319,7 +288,6 @@ md_find_and_select_comfyui_path() {
         fi
     done
 
-    # 2. Søk i vanlige steder (kan utelates hvis vi stoler på forhåndsdefinerte)
     local search_locations=("$HOME" "/mnt" "/opt" "/srv")
     for loc in "${search_locations[@]}"; do
         mapfile -t -d $'\0' current_finds < <(find "$loc" -maxdepth 4 -type d \( -name "ComfyUI" -o -name "comfyui_data" \) -print0 2>/dev/null)
@@ -343,25 +311,25 @@ md_find_and_select_comfyui_path() {
         done
         echo "  $((${#found_paths[@]}+1))) Angi sti manuelt"
 
-        local choice
+        local choice_val
         while true; do
-            local default_choice_prompt="1"
-             if [ ${#found_paths[@]} -eq 0 ]; then default_choice_prompt="$((${#found_paths[@]}+1))"; fi
-            read -r -p "Velg en sti for ComfyUI-data (1-$((${#found_paths[@]}+1))), Enter for $default_choice_prompt): " choice
-            choice="${choice:-$default_choice_prompt}"
-            if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le $((${#found_paths[@]}+1)) ]; then
+            local default_choice_prompt_val="1"
+             if [ ${#found_paths[@]} -eq 0 ]; then default_choice_prompt_val="$((${#found_paths[@]}+1))"; fi
+            read -r -p "Velg en sti for ComfyUI-data (1-$((${#found_paths[@]}+1))), Enter for $default_choice_prompt_val): " choice_val </dev/tty
+            choice_val="${choice_val:-$default_choice_prompt_val}"
+            if [[ "$choice_val" =~ ^[0-9]+$ ]] && [ "$choice_val" -ge 1 ] && [ "$choice_val" -le $((${#found_paths[@]}+1)) ]; then
                 break
             else log_warn "Ugyldig valg."; fi
         done
 
-        if [ "$choice" -le ${#found_paths[@]} ]; then
-            MD_COMFYUI_PATH="${found_paths[$((choice-1))]}"
+        if [ "$choice_val" -le ${#found_paths[@]} ]; then
+            MD_COMFYUI_PATH="${found_paths[$((choice_val-1))]}"
         fi
     fi
 
     while [[ -z "$MD_COMFYUI_PATH" ]]; do
-        read -r -e -p "Vennligst oppgi full sti til din ComfyUI data mappe (den som inneholder 'models'): " manual_path
-        manual_path="${manual_path%/}" # Fjern trailing slash
+        read -r -e -p "Vennligst oppgi full sti til din ComfyUI data mappe (den som inneholder 'models'): " manual_path </dev/tty
+        manual_path="${manual_path%/}" 
         if [[ -d "$manual_path" ]] && [[ -d "$manual_path/models" ]]; then
             MD_COMFYUI_PATH="$manual_path"
         else
@@ -378,14 +346,13 @@ md_find_and_select_comfyui_path() {
     return 0
 }
 
-
 md_get_links_from_url() {
     local url="$1"
     curl --connect-timeout 5 -s -L -f "$url" 2>/dev/null | \
     grep -o '<a href="[^"]*"' | \
     sed 's/<a href="//;s/"//' | \
     grep -v '^$' | \
-    grep -E -v '(\.\.\/|Parent Directory|^\?|^\.|apache\.org|速度|名称|修改日期|大小)' || echo "" # Returner tom streng ved feil
+    grep -E -v '(\.\.\/|Parent Directory|^\?|^\.|apache\.org|速度|名称|修改日期|大小)' || echo "" 
 }
 
 md_download_file() {
@@ -406,7 +373,6 @@ md_download_file() {
 
     if wget -c -O "$target_path" "$source_url" -q --show-progress --progress=bar:force 2>&1; then
       log_success "Nedlasting av '$target_filename' fullført!"
-      # Liten filstørrelsesjekk
       if [ -f "$target_path" ]; then
          local filesize; filesize=$(stat -c%s "$target_path")
          if [ "$filesize" -lt 10000 ]; then
@@ -416,7 +382,7 @@ md_download_file() {
       return 0
     else
       log_error "Nedlasting av '$target_filename' mislyktes."
-      rm -f "$target_path" # Fjern ufullstendig fil
+      rm -f "$target_path" 
       return 1
     fi
 }
@@ -437,37 +403,36 @@ md_handle_package_download() {
     fi
 
     echo "Tilgjengelige modellpakker:"; for i in "${!package_display_names[@]}"; do echo " $((i+1))) ${package_display_names[$i]}"; done
-    echo " $((${#package_display_names[@]}+1))) Tilbake"; local choice_idx
+    echo " $((${#package_display_names[@]}+1))) Tilbake"; local choice_idx_pkg
     while true; do
-        read -r -p "Velg pakke (1-$((${#package_display_names[@]}+1))): " choice_idx
-        if [[ "$choice_idx" =~ ^[0-9]+$ ]] && [ "$choice_idx" -ge 1 ] && [ "$choice_idx" -le $((${#package_display_names[@]}+1)) ]; then break; else log_warn "Ugyldig."; fi
+        read -r -p "Velg pakke (1-$((${#package_display_names[@]}+1))): " choice_idx_pkg </dev/tty
+        if [[ "$choice_idx_pkg" =~ ^[0-9]+$ ]] && [ "$choice_idx_pkg" -ge 1 ] && [ "$choice_idx_pkg" -le $((${#package_display_names[@]}+1)) ]; then break; else log_warn "Ugyldig."; fi
     done
-    if [ "$choice_idx" -eq $((${#package_display_names[@]}+1)) ]; then return 0; fi
-    local selected_pkg_idx=$((choice_idx - 1))
-    mapfile -t files_to_dl < <(echo "$packages_json" | jq -r --argjson idx "$selected_pkg_idx" '.packages[$idx].files[]')
-    if [ ${#files_to_dl[@]} -eq 0 ]; then log_warn "Ingen filer for denne pakken."; press_enter_to_continue; return 0; fi
+    if [ "$choice_idx_pkg" -eq $((${#package_display_names[@]}+1)) ]; then return 0; fi
+    local selected_pkg_idx_val=$((choice_idx_pkg - 1))
+    mapfile -t files_to_dl_pkg < <(echo "$packages_json" | jq -r --argjson idx "$selected_pkg_idx_val" '.packages[$idx].files[]')
+    if [ ${#files_to_dl_pkg[@]} -eq 0 ]; then log_warn "Ingen filer for denne pakken."; press_enter_to_continue; return 0; fi
 
-    log_info "Pakke: ${package_display_names[$selected_pkg_idx]}"; echo "Filer som lastes ned (hvis de ikke finnes):"
-    for file_rel_path in "${files_to_dl[@]}"; do echo "  - $file_rel_path"; done
-    read -r -p "Fortsett? (ja/nei): " confirm_dl; if [[ ! "$confirm_dl" =~ ^[Jj][Aa]$ ]]; then return 0; fi
+    log_info "Pakke: ${package_display_names[$selected_pkg_idx_val]}"; echo "Filer som lastes ned (hvis de ikke finnes):"
+    for file_rel_path_pkg in "${files_to_dl_pkg[@]}"; do echo "  - $file_rel_path_pkg"; done
+    read -r -p "Fortsett? (ja/nei): " confirm_dl_pkg </dev/tty; if [[ ! "$confirm_dl_pkg" =~ ^[Jj][Aa]$ ]]; then return 0; fi
 
-    local dl_c=0 skip_c=0 fail_c=0
-    for file_rel_path in "${files_to_dl[@]}"; do
-        local src_url="${MD_SERVER_BASE_URL}${file_rel_path}"
-        local target_path="${MD_COMFYUI_BASE_MODELS_PATH}/${file_rel_path}"
-        if [ -f "$target_path" ]; then
-            log_warn "Filen '$(basename "$file_rel_path")' finnes. Overskriv? (ja/Nei): "
-            read -r ovrw_pkg; if [[ ! "$ovrw_pkg" =~ ^[Jj][Aa]$ ]]; then log_info "Hopper over."; skip_c=$((skip_c+1)); continue; fi
+    local dl_c_pkg=0 skip_c_pkg=0 fail_c_pkg=0
+    for file_rel_path_pkg in "${files_to_dl_pkg[@]}"; do
+        local src_url_pkg="${MD_SERVER_BASE_URL}${file_rel_path_pkg}"
+        local target_path_pkg="${MD_COMFYUI_BASE_MODELS_PATH}/${file_rel_path_pkg}"
+        if [ -f "$target_path_pkg" ]; then
+            read -r -p "Filen '$(basename "$file_rel_path_pkg")' finnes. Overskriv? (ja/Nei): " ovrw_pkg_file </dev/tty
+            if [[ ! "$ovrw_pkg_file" =~ ^[Jj][Aa]$ ]]; then log_info "Hopper over."; skip_c_pkg=$((skip_c_pkg+1)); continue; fi
         fi
-        if md_download_file "$src_url" "$target_path"; then dl_c=$((dl_c+1)); else fail_c=$((fail_c+1)); fi
+        if md_download_file "$src_url_pkg" "$target_path_pkg"; then dl_c_pkg=$((dl_c_pkg+1)); else fail_c_pkg=$((fail_c_pkg+1)); fi
     done
-    log_info "Pakkenedlasting ferdig. Nedlastet: $dl_c, Hoppet over: $skip_c, Mislyktes: $fail_c."
+    log_info "Pakkenedlasting ferdig. Nedlastet: $dl_c_pkg, Hoppet over: $skip_c_pkg, Mislyktes: $fail_c_pkg."
     press_enter_to_continue
 }
 
-
 run_model_downloader() {
-    local preselected_path_for_data_dir="$1" # Dette er f.eks. ~/comfyui_unified_setup/comfyui_data
+    local preselected_path_for_data_dir="$1" 
 
     if ! md_check_jq; then press_enter_to_continue; return 1; fi
     if ! md_find_and_select_comfyui_path "$preselected_path_for_data_dir"; then
@@ -476,7 +441,6 @@ run_model_downloader() {
         return 1
     fi
 
-    # Hovedløkke for modelldownloader
     while true; do
         clear
         echo "--- Modelldenedlastingsverktøy ---"
@@ -488,82 +452,83 @@ run_model_downloader() {
         echo "3) Last ned forhåndsdefinert modellpakke"
         echo "4) Bytt ComfyUI models-mappe"
         echo "5) Tilbake til hovedmeny"
-        local md_choice
-        read -r -p "Velg et alternativ (1-5): " md_choice
-        case "$md_choice" in
-            1) # Utforsk enkeltfiler
-                while true; do # Mappevalg
+        local md_choice_val
+        read -r -p "Velg et alternativ (1-5): " md_choice_val </dev/tty
+        case "$md_choice_val" in
+            1) 
+                while true; do 
                     clear; echo "--- Utforsker mapper på $MD_SERVER_BASE_URL ---"
-                    local map_links_output; map_links_output=$(md_get_links_from_url "$MD_SERVER_BASE_URL")
-                    local map_links; map_links=$(echo "$map_links_output" | grep '/$' )
-                    if [ -z "$map_links" ]; then log_warn "Fant ingen undermapper."; sleep 2; break; fi
-                    local map_array=(); while IFS= read -r line; do map_array+=("$line"); done <<< "$map_links"
-                    echo "Tilgjengelige mapper:"; for i in "${!map_array[@]}"; do echo "$((i+1))) ${map_array[$i]}"; done
-                    echo "$((${#map_array[@]}+1))) Tilbake"; local map_c
-                    while true; do read -r -p "Velg mappe (1-$((${#map_array[@]}+1))): " map_c; if [[ "$map_c" =~ ^[0-9]+$ ]] && [ "$map_c" -ge 1 ] && [ "$map_c" -le $((${#map_array[@]}+1)) ]; then break; fi; done
-                    if [ "$map_c" -eq $((${#map_array[@]}+1)) ]; then break; fi
-                    local sel_subdir="${map_array[$((map_c-1))]}"
+                    local map_links_output_val; map_links_output_val=$(md_get_links_from_url "$MD_SERVER_BASE_URL")
+                    local map_links_val; map_links_val=$(echo "$map_links_output_val" | grep '/$' )
+                    if [ -z "$map_links_val" ]; then log_warn "Fant ingen undermapper."; sleep 2; break; fi
+                    local map_array_val=(); while IFS= read -r line; do map_array_val+=("$line"); done <<< "$map_links_val"
+                    echo "Tilgjengelige mapper:"; for i in "${!map_array_val[@]}"; do echo "$((i+1))) ${map_array_val[$i]}"; done
+                    echo "$((${#map_array_val[@]}+1))) Tilbake"; local map_c_val
+                    while true; do read -r -p "Velg mappe (1-$((${#map_array_val[@]}+1))): " map_c_val </dev/tty; if [[ "$map_c_val" =~ ^[0-9]+$ ]] && [ "$map_c_val" -ge 1 ] && [ "$map_c_val" -le $((${#map_array_val[@]}+1)) ]; then break; fi; done
+                    if [ "$map_c_val" -eq $((${#map_array_val[@]}+1)) ]; then break; fi
+                    local sel_subdir_val="${map_array_val[$((map_c_val-1))]}"
 
-                    while true; do # Filvalg
-                        clear; local current_srv_dir_url="${MD_SERVER_BASE_URL}${sel_subdir}"
-                        echo "--- Filer i $current_srv_dir_url ---"
-                        local file_links_o; file_links_o=$(md_get_links_from_url "$current_srv_dir_url")
-                        local file_links_f; file_links_f=$(echo "$file_links_o" | grep -v '/$' )
-                        local file_array_f=(); if [ -n "$file_links_f" ]; then while IFS= read -r line; do file_array_f+=("$line"); done <<< "$file_links_f"; fi
-                        if [ ${#file_array_f[@]} -eq 0 ]; then log_warn "Ingen filer funnet."; else echo "Filer:"; for i in "${!file_array_f[@]}"; do echo "$((i+1))) ${file_array_f[$i]}"; done; fi
-                        echo "$((${#file_array_f[@]}+1))) Tilbake"; local file_c
-                        while true; do read -r -p "Velg fil (1-$((${#file_array_f[@]}+1))): " file_c; if [[ "$file_c" =~ ^[0-9]+$ ]] && [ "$file_c" -ge 1 ] && [ "$file_c" -le $((${#file_array_f[@]}+1)) ]; then break; fi; done
-                        if [ "$file_c" -eq $((${#file_array_f[@]}+1)) ]; then break; fi
-                        local sel_fname="${file_array_f[$((file_c-1))]}"
-                        local src_url_f="$current_srv_dir_url$sel_fname"
-                        local target_path_f="$MD_COMFYUI_BASE_MODELS_PATH/$sel_subdir$sel_fname"
-                        if [ -f "$target_path_f" ]; then
-                           log_warn "Filen finnes. Overskriv? (ja/nei):"; read -r ovrw_f; if [[ ! "$ovrw_f" =~ ^[Jj][Aa]$ ]]; then log_info "Hopper over."; continue; fi
+                    while true; do 
+                        clear; local current_srv_dir_url_val="${MD_SERVER_BASE_URL}${sel_subdir_val}"
+                        echo "--- Filer i $current_srv_dir_url_val ---"
+                        local file_links_o_val; file_links_o_val=$(md_get_links_from_url "$current_srv_dir_url_val")
+                        local file_links_f_val; file_links_f_val=$(echo "$file_links_o_val" | grep -v '/$' )
+                        local file_array_f_val=(); if [ -n "$file_links_f_val" ]; then while IFS= read -r line; do file_array_f_val+=("$line"); done <<< "$file_links_f_val"; fi
+                        if [ ${#file_array_f_val[@]} -eq 0 ]; then log_warn "Ingen filer funnet."; else echo "Filer:"; for i in "${!file_array_f_val[@]}"; do echo "$((i+1))) ${file_array_f_val[$i]}"; done; fi
+                        echo "$((${#file_array_f_val[@]}+1))) Tilbake"; local file_c_val
+                        while true; do read -r -p "Velg fil (1-$((${#file_array_f_val[@]}+1))): " file_c_val </dev/tty; if [[ "$file_c_val" =~ ^[0-9]+$ ]] && [ "$file_c_val" -ge 1 ] && [ "$file_c_val" -le $((${#file_array_f_val[@]}+1)) ]; then break; fi; done
+                        if [ "$file_c_val" -eq $((${#file_array_f_val[@]}+1)) ]; then break; fi
+                        local sel_fname_val="${file_array_f_val[$((file_c_val-1))]}"
+                        local src_url_f_val="$current_srv_dir_url_val$sel_fname_val"
+                        local target_path_f_val="$MD_COMFYUI_BASE_MODELS_PATH/$sel_subdir_val$sel_fname_val"
+                        if [ -f "$target_path_f_val" ]; then
+                           read -r -p "Filen finnes. Overskriv? (ja/nei):" ovrw_f_val </dev/tty; if [[ ! "$ovrw_f_val" =~ ^[Jj][Aa]$ ]]; then log_info "Hopper over."; continue; fi
                         fi
-                        md_download_file "$src_url_f" "$target_path_f"
-                        read -r -p "Last ned en annen fil fra '$sel_subdir'? (ja/nei) [j]: " another_f; if [[ "$another_f" =~ ^[Nn]$ ]]; then break; fi
+                        md_download_file "$src_url_f_val" "$target_path_f_val"
+                        read -r -p "Last ned en annen fil fra '$sel_subdir_val'? (ja/nei) [j]: " another_f_val </dev/tty; another_f_val=${another_f_val:-j}; if [[ "$another_f_val" =~ ^[Nn]$ ]]; then break; fi
                     done
-                    read -r -p "Utforske en annen mappe? (ja/nei) [j]: " another_m; if [[ "$another_m" =~ ^[Nn]$ ]]; then break; fi
+                    read -r -p "Utforske en annen mappe? (ja/nei) [j]: " another_m_val </dev/tty; another_m_val=${another_m_val:-j}; if [[ "$another_m_val" =~ ^[Nn]$ ]]; then break; fi
                 done ;;
-            2) # Last ned alle
+            2) 
                 clear; echo "--- Last ned alle manglende modeller ---"
-                read -r -p "Dette kan ta lang tid. Er du sikker? (ja/nei): " confirm_all
-                if [[ ! "$confirm_all" =~ ^[Jj][Aa]$ ]]; then log_info "Avbrutt."; continue; fi
-                local map_links_all_o; map_links_all_o=$(md_get_links_from_url "$MD_SERVER_BASE_URL")
-                local map_links_all; map_links_all=$(echo "$map_links_all_o" | grep '/$' )
-                if [ -z "$map_links_all" ]; then log_warn "Fant ingen undermapper på server."; else
-                    local map_arr_all=(); while IFS= read -r line; do map_arr_all+=("$line"); done <<< "$map_links_all"
-                    for cur_subdir_all in "${map_arr_all[@]}"; do
-                        log_info "Sjekker mappe: $cur_subdir_all"
-                        local files_o_all; files_o_all=$(md_get_links_from_url "$MD_SERVER_BASE_URL$cur_subdir_all")
-                        local files_f_all; files_f_all=$(echo "$files_o_all" | grep -v '/$' )
-                        if [ -z "$files_f_all" ]; then log_info " Ingen filer i denne mappen."; continue; fi
-                        local files_arr_dl_all=(); while IFS= read -r line; do files_arr_dl_all+=("$line"); done <<< "$files_f_all"
-                        for cur_fname_all in "${files_arr_dl_all[@]}"; do
-                            local target_p_all="$MD_COMFYUI_BASE_MODELS_PATH/$cur_subdir_all$cur_fname_all"
-                            if [ -f "$target_p_all" ]; then echo "  Skipper: '$(basename "$target_p_all")' finnes."; else
-                                md_download_file "$MD_SERVER_BASE_URL$cur_subdir_all$cur_fname_all" "$target_p_all"
+                read -r -p "Dette kan ta lang tid. Er du sikker? (ja/nei): " confirm_all_val </dev/tty
+                if [[ ! "$confirm_all_val" =~ ^[Jj][Aa]$ ]]; then log_info "Avbrutt."; continue; fi
+                local map_links_all_o_val; map_links_all_o_val=$(md_get_links_from_url "$MD_SERVER_BASE_URL")
+                local map_links_all_val; map_links_all_val=$(echo "$map_links_all_o_val" | grep '/$' )
+                if [ -z "$map_links_all_val" ]; then log_warn "Fant ingen undermapper på server."; else
+                    local map_arr_all_val=(); while IFS= read -r line; do map_arr_all_val+=("$line"); done <<< "$map_links_all_val"
+                    for cur_subdir_all_val in "${map_arr_all_val[@]}"; do
+                        log_info "Sjekker mappe: $cur_subdir_all_val"
+                        local files_o_all_val; files_o_all_val=$(md_get_links_from_url "$MD_SERVER_BASE_URL$cur_subdir_all_val")
+                        local files_f_all_val; files_f_all_val=$(echo "$files_o_all_val" | grep -v '/$' )
+                        if [ -z "$files_f_all_val" ]; then log_info " Ingen filer i denne mappen."; continue; fi
+                        local files_arr_dl_all_val=(); while IFS= read -r line; do files_arr_dl_all_val+=("$line"); done <<< "$files_f_all_val"
+                        for cur_fname_all_val in "${files_arr_dl_all_val[@]}"; do
+                            local target_p_all_val="$MD_COMFYUI_BASE_MODELS_PATH/$cur_subdir_all_val$cur_fname_all_val"
+                            if [ -f "$target_p_all_val" ]; then echo "  Skipper: '$(basename "$target_p_all_val")' finnes."; else
+                                md_download_file "$MD_SERVER_BASE_URL$cur_subdir_all_val$cur_fname_all_val" "$target_p_all_val"
                             fi
                         done
                     done
                 fi
                 log_success "Nedlasting av alle fullført."; press_enter_to_continue ;;
             3) md_handle_package_download ;;
-            4) # Bytt ComfyUI models-mappe
-                MD_COMFYUI_PATH="" # Nullstill for å tvinge nytt valg
+            4) 
+                MD_COMFYUI_PATH="" 
                 MD_COMFYUI_BASE_MODELS_PATH=""
-                if ! md_find_and_select_comfyui_path ""; then # "" betyr ingen forhåndsvalgt sti
+                if ! md_find_and_select_comfyui_path ""; then 
                     log_error "Kunne ikke sette ny ComfyUI models-sti."
                 fi
                 press_enter_to_continue ;;
-            5) break ;; # Tilbake til hovedmeny
+            5) break ;; 
             *) log_warn "Ugyldig valg." ;;
         esac
     done
 }
+
 # --- Hovedmeny Funksjon ---
 main_menu() {
-    initialize_docker_paths # Sørg for at disse er satt ved start
+    initialize_docker_paths 
     while true; do
         clear
         echo "--- ComfyUI Unified Tool ---"
@@ -577,12 +542,12 @@ main_menu() {
         echo "5) Stopp ComfyUI Docker Container(e)"
         echo "6) Avslutt"
         echo "--------------------------------"
-        read -r -p "Velg et alternativ: " choice
+        local main_choice
+        read -r -p "Velg et alternativ: " main_choice </dev/tty
 
-        # Nullstill feilflagg for set -e
-        set +e
+        set +e # Tillat feil uten å avslutte hele skriptet i case-blokken
 
-        case "$choice" in
+        case "$main_choice" in
             1) perform_docker_initial_setup ;;
             2)
                 if ! check_docker_status; then press_enter_to_continue; continue; fi
@@ -590,11 +555,12 @@ main_menu() {
                 press_enter_to_continue
                 ;;
             3)
-                # Hvis Docker-oppsettet er gjort, bruk den stien, ellers la brukeren velge
                 if [[ -d "$DOCKER_DATA_ACTUAL_PATH/models" ]]; then
                     run_model_downloader "$DOCKER_DATA_ACTUAL_PATH"
                 else
-                    run_model_downloader # Uten argument, bruker vil bli spurt
+                    log_info "Docker data sti ikke funnet ($DOCKER_DATA_ACTUAL_PATH/models)."
+                    log_info "Lar deg velge sti for modelldenedlasting manuelt."
+                    run_model_downloader 
                 fi
                 ;;
             4)
