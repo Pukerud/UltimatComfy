@@ -79,22 +79,24 @@ build_comfyui_image() {
     log_info "Runtime tag er hardkodet i Dockerfile som: 12.4.1-cudnn-runtime-ubuntu22.04"
     log_info "Dette kan ta en stund."
 
-    log_info "TRYKK ENTER FOR Å STARTE BYGGING ETTER Å HA SETT DEBUG-INFO OVENFOR..."
-    press_enter_to_continue
-
     local build_arg_devel_str
     build_arg_devel_str=$(printf '%s=%s' "PASSED_CUDA_DEVEL_TAG" "$clean_devel_tag")
 
-    log_info "DEBUG: Bygger med arg devel: [--build-arg $build_arg_devel_str]"
-    press_enter_to_continue
+    local DOCKER_BUILD_LOG_FILE
+    DOCKER_BUILD_LOG_FILE="${DOCKER_CONFIG_ACTUAL_PATH}/docker_build_$(date +%Y%m%d_%H%M%S).log"
+    log_info "Docker build output will be logged to: ${DOCKER_BUILD_LOG_FILE}"
 
-    if docker build -t "$COMFYUI_IMAGE_NAME" \
+    # Execute docker build and tee output to log file and screen
+    docker build -t "$COMFYUI_IMAGE_NAME" \
         --build-arg "$build_arg_devel_str" \
-        "$DOCKER_CONFIG_ACTUAL_PATH"; then
-        log_success "Docker-image '$COMFYUI_IMAGE_NAME' bygget/oppdatert vellykket."
+        "$DOCKER_CONFIG_ACTUAL_PATH" 2>&1 | tee "${DOCKER_BUILD_LOG_FILE}"
+
+    # Check the exit status of 'docker build' (the first command in the pipe)
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        log_success "Docker-image '$COMFYUI_IMAGE_NAME' bygget/oppdatert vellykket. Full log: ${DOCKER_BUILD_LOG_FILE}"
         return 0
     else
-        log_error "Bygging av Docker-image mislyktes."
+        log_error "Bygging av Docker-image mislyktes. Sjekk loggfilen for detaljer: ${DOCKER_BUILD_LOG_FILE}"
         log_error "FEIL UNDER DOCKER BUILD. TRYKK ENTER FOR Å GÅ TILBAKE TIL MENY."
         press_enter_to_continue
         return 1
