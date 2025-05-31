@@ -8,6 +8,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC
 
 # For Docker-oppsett
 BASE_DOCKER_SETUP_DIR="$HOME/comfyui_unified_setup"
+SCRIPT_LOG_FILE="$BASE_DOCKER_SETUP_DIR/ultimate_comfy_debug.log"
 DOCKERFILES_DIR_NAME="docker_config"
 COMFYUI_DATA_DIR_NAME="comfyui_data"
 SCRIPTS_DIR_NAME="scripts"
@@ -32,6 +33,27 @@ DOCKER_SCRIPTS_ACTUAL_PATH=""
 MD_COMFYUI_PATH=""
 MD_COMFYUI_BASE_MODELS_PATH=""
 
+# --- Logging Setup ---
+# Ensure log directory exists (might run before initialize_docker_paths which also creates BASE_DOCKER_SETUP_DIR)
+mkdir -p "$(dirname "$SCRIPT_LOG_FILE")"
+
+# Script-wide debug logging function
+script_log() {
+    # Check if SCRIPT_LOG_FILE is writable, basic check
+    if [ -w "$(dirname "$SCRIPT_LOG_FILE")" ]; then # Check if directory is writable
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$SCRIPT_LOG_FILE"
+    else
+        # Fallback if log file is not writable, echo to stderr
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - LOG_WRITE_ERROR - $1" >&2
+    fi
+}
+
+# Initial Log and Exit Trap
+echo "--- Log Start $(date '+%Y-%m-%d %H:%M:%S') ---" > "$SCRIPT_LOG_FILE" # Overwrite for fresh log
+script_log "INFO: Script execution started. Logging to $SCRIPT_LOG_FILE"
+script_log "INFO: BASE_DOCKER_SETUP_DIR set to $BASE_DOCKER_SETUP_DIR"
+trap 'script_log "INFO: --- Script execution finished with exit status $? ---"' EXIT
+
 # --- Felles Hjelpefunksjoner ---
 log_info() { echo -e "${BLUE}INFO:${NC} $1"; }
 log_success() { echo -e "${GREEN}SUCCESS:${NC} $1"; }
@@ -43,34 +65,42 @@ press_enter_to_continue() {
 }
 
 initialize_docker_paths() {
+    script_log "DEBUG: ENTERING initialize_docker_paths"
     DOCKER_CONFIG_ACTUAL_PATH="$BASE_DOCKER_SETUP_DIR/$DOCKERFILES_DIR_NAME"
     DOCKER_DATA_ACTUAL_PATH="$BASE_DOCKER_SETUP_DIR/$COMFYUI_DATA_DIR_NAME"
     DOCKER_SCRIPTS_ACTUAL_PATH="$BASE_DOCKER_SETUP_DIR/$SCRIPTS_DIR_NAME"
+    script_log "DEBUG: EXITING initialize_docker_paths"
 }
 
 ensure_dialog_installed() {
+    script_log "DEBUG: ENTERING ensure_dialog_installed"
     if command -v dialog &>/dev/null; then
-        # log_info "Dialog utility is available." # Optional: for debugging
-        return 0 # Dialog is already installed
+        script_log "DEBUG: 'dialog' is available."
+        script_log "DEBUG: EXITING ensure_dialog_installed (status 0)"
+        return 0
     fi
 
-    log_warn "The 'dialog' utility is not installed. It is recommended for a better user interface."
+    script_log "WARN: 'dialog' utility not installed." # Changed from log_warn to script_log for consistency
     local install_dialog_choice
     read -r -p "Do you want to attempt to install 'dialog' using 'sudo apt-get install -y dialog'? (ja/nei): " install_dialog_choice </dev/tty
+    script_log "INFO: User choice for dialog install: '$install_dialog_choice'"
 
     if [[ "$install_dialog_choice" =~ ^[Jj][Aa]$ ]]; then
-        log_info "Attempting to install 'dialog'..."
+        script_log "INFO: Attempting 'dialog' installation..."
         if sudo apt-get update && sudo apt-get install -y dialog; then
-            log_success "'dialog' installed successfully."
+            script_log "SUCCESS: 'dialog' installed successfully." # Changed from log_success
+            script_log "DEBUG: EXITING ensure_dialog_installed (status 0)"
             return 0
         else
-            log_error "Failed to install 'dialog'. Please install it manually if you want the enhanced UI."
-            log_warn "Falling back to basic menu."
+            script_log "ERROR: Failed to install 'dialog'." # Changed from log_error
+            script_log "WARN: Falling back to basic menu." # Changed from log_warn
+            script_log "DEBUG: EXITING ensure_dialog_installed (status 1)"
             return 1
         fi
     else
-        log_info "Skipping 'dialog' installation."
-        log_warn "Falling back to basic menu."
+        script_log "INFO: Skipping 'dialog' installation."
+        script_log "WARN: Falling back to basic menu." # Changed from log_warn
+        script_log "DEBUG: EXITING ensure_dialog_installed (status 1)"
         return 1
     fi
 }
@@ -89,6 +119,7 @@ check_docker_status() {
 }
 
 build_comfyui_image() {
+    script_log "DEBUG: ENTERING build_comfyui_image"
     initialize_docker_paths
     if [[ ! -f "$DOCKER_CONFIG_ACTUAL_PATH/Dockerfile" ]]; then
         log_error "Dockerfile ikke funnet i $DOCKER_CONFIG_ACTUAL_PATH. Kjør installasjon (valg 1) først."
@@ -126,13 +157,19 @@ build_comfyui_image() {
         log_error "Bygging av Docker-image mislyktes. Sjekk loggfilen for detaljer: ${DOCKER_BUILD_LOG_FILE}"
         log_error "FEIL UNDER DOCKER BUILD. TRYKK ENTER FOR Å GÅ TILBAKE TIL MENY."
         press_enter_to_continue
+        script_log "DEBUG: EXITING build_comfyui_image (Dockerfile not found or build failed)"
         return 1
     fi
+    script_log "DEBUG: EXITING build_comfyui_image"
 }
 
 perform_docker_initial_setup() {
+    script_log "DEBUG: ENTERING perform_docker_initial_setup"
     set -e 
-    if ! check_docker_status; then return 1; fi
+    if ! check_docker_status; then
+        script_log "DEBUG: EXITING perform_docker_initial_setup (Docker status check failed)"
+        return 1;
+    fi
     initialize_docker_paths
 
     log_info "Starter førstegangs oppsett for ComfyUI i Docker..."
@@ -281,9 +318,11 @@ perform_docker_initial_setup() {
     if [[ "$model_download_choice" =~ ^[Jj][Aa]$ ]]; then
         run_model_downloader "$DOCKER_DATA_ACTUAL_PATH" 
     fi
+    script_log "DEBUG: EXITING perform_docker_initial_setup"
 }
 
 install_comfyui_manager_on_host() {
+    script_log "DEBUG: ENTERING install_comfyui_manager_on_host"
     if [ -z "$DOCKER_DATA_ACTUAL_PATH" ]; then
         initialize_docker_paths
     fi
@@ -332,6 +371,7 @@ install_comfyui_manager_on_host() {
         log_error "Failed to clone ComfyUI-Manager."
         return 1
     fi
+    script_log "DEBUG: EXITING install_comfyui_manager_on_host"
     return 0
 }
 
@@ -549,11 +589,14 @@ main_menu() {
 
     ensure_dialog_installed # Call the function to check/install dialog
     local dialog_available=$? # Store its return status
+    script_log "DEBUG: ensure_dialog_installed returned: $dialog_available"
 
     local main_choice
 
     while true; do
+        script_log "DEBUG: main_menu loop iteration started. dialog_available=$dialog_available"
         if [ "$dialog_available" -eq 0 ]; then
+            script_log "DEBUG: Calling dialog command..."
             # Use dialog for menu
             # Redirect stderr to a temporary file to check dialog's exit status properly
             # as dialog itself writes selection to stderr if --stdout is not used.
@@ -575,10 +618,13 @@ Choose an option:" \
                 "6" "Avslutt")
 
             local dialog_exit_status=$?
+            script_log "DEBUG: dialog command finished. main_choice='$main_choice', dialog_exit_status='$dialog_exit_status'"
             if [ $dialog_exit_status -ne 0 ]; then # User pressed Esc or "Exit"
                 main_choice="6"
+                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 6."
             fi
         else
+            script_log "DEBUG: Using basic menu fallback."
             # Fallback to basic menu
             clear # Clear screen for the basic menu
             echo "--- ComfyUI Unified Tool (v4) ---"
@@ -594,8 +640,10 @@ Choose an option:" \
             echo "6) Avslutt"
             echo "--------------------------------"
             read -r -p "Velg et alternativ (1-6): " main_choice </dev/tty
+            script_log "DEBUG: Basic menu read finished. main_choice='$main_choice'"
         fi
 
+        script_log "DEBUG: main_menu case: main_choice='$main_choice'"
         set +e 
         case "$main_choice" in
             "1")
@@ -642,6 +690,7 @@ Choose an option:" \
                 press_enter_to_continue
                 ;;
             "6")
+                script_log "DEBUG: main_menu attempting to exit (Option 6)."
                 log_info "Avslutter."
                 clear # Clear screen on exit
                 exit 0
@@ -659,6 +708,10 @@ Choose an option:" \
 }
 
 # --- Skriptets startpunkt ---
-clear
+# clear # Comment out clear for now to see any echos before this.
+script_log "DEBUG: --- Skriptets startpunkt (before initial clear and log_info) ---"
 log_info "Starter ComfyUI Unified Tool (v4)..." # Lagt til v4 her
+
+script_log "DEBUG: About to call main_menu."
 main_menu
+script_log "DEBUG: main_menu call finished (script should have exited from within main_menu)."
