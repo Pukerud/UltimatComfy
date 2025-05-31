@@ -86,8 +86,9 @@ build_comfyui_image() {
     DOCKER_BUILD_LOG_FILE="${DOCKER_CONFIG_ACTUAL_PATH}/docker_build_$(date +%Y%m%d_%H%M%S).log"
     log_info "Docker build output will be logged to: ${DOCKER_BUILD_LOG_FILE}"
 
+    log_warn "Attempting a --no-cache build for diagnostics." # Inform the user
     # Execute docker build and tee output to log file and screen
-    docker build -t "$COMFYUI_IMAGE_NAME" \
+    docker build --no-cache -t "$COMFYUI_IMAGE_NAME" \
         --build-arg "$build_arg_devel_str" \
         "$DOCKER_CONFIG_ACTUAL_PATH" 2>&1 | tee "${DOCKER_BUILD_LOG_FILE}"
 
