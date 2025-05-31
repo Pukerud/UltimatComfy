@@ -239,6 +239,7 @@ perform_docker_initial_setup() {
 }
 
 # --- Model Downloader Funksjoner ---
+
 md_check_jq() {
     if ! command -v jq &> /dev/null; then
         log_error "'jq' er ikke funnet. Dette kreves for modelldenedlasting."
@@ -252,20 +253,24 @@ md_find_and_select_comfyui_path() {
     local pre_selected_path_base="$1" 
     local found_paths=()
     log_info "Søker etter ComfyUI-installasjoner for modelldenedlasting..."
+
     if [[ -n "$pre_selected_path_base" ]] && [[ -d "$pre_selected_path_base/models" ]]; then
         log_info "Bruker forhåndsvalgt sti fra Docker-oppsett: $pre_selected_path_base"
         MD_COMFYUI_PATH="${pre_selected_path_base%/}"
         MD_COMFYUI_BASE_MODELS_PATH="$MD_COMFYUI_PATH/models"
         read -r -p "Vil du bruke denne stien ($MD_COMFYUI_PATH) for modeller, eller velge en annen? (Bruk denne/Velg annen) [B]: " use_preselected </dev/tty
-        use_preselected=${use_preselected:-B}
-        if [[ "$use_preselected" =~ ^[Vv]$ ]]; then
+        use_preselected=${use_preselected:-B} # Default til Bruk denne
+        if [[ "$use_preselected" =~ ^[Vv]$ ]]; then # V for Velg annen
             MD_COMFYUI_PATH="" 
             MD_COMFYUI_BASE_MODELS_PATH=""
+            log_info "Lar deg velge sti manuelt."
         else
             log_success "Bruker $MD_COMFYUI_PATH for modelldenedlasting."
             return 0 
         fi
     fi
+
+    # Fallback til å søke hvis ingen forhåndsvalgt sti ble akseptert
     if [[ -n "$MD_DEFAULT_COMFYUI_PATH_FALLBACK" ]]; then
         local normalized_default_path="${MD_DEFAULT_COMFYUI_PATH_FALLBACK%/}"
         if [[ -d "$normalized_default_path" ]] && [[ -d "$normalized_default_path/models" ]]; then
@@ -274,6 +279,7 @@ md_find_and_select_comfyui_path() {
             fi
         fi
     fi
+
     for additional_path_candidate in "${MD_ADDITIONAL_COMFYUI_PATHS_FALLBACK[@]}"; do
         if [[ -n "$additional_path_candidate" ]]; then
             local normalized_additional_path="${additional_path_candidate%/}"
@@ -284,22 +290,27 @@ md_find_and_select_comfyui_path() {
             fi
         fi
     done
+
     local search_locations=("$HOME" "/mnt" "/opt" "/srv")
     for loc in "${search_locations[@]}"; do
         mapfile -t -d $'\0' current_finds < <(find "$loc" -maxdepth 4 -type d \( -name "ComfyUI" -o -name "comfyui_data" -o -name "comfyui_unified_setup" \) -print0 2>/dev/null)
         for path_found in "${current_finds[@]}"; do
             local normalized_path="${path_found%/}"
-            if [[ -d "$normalized_path/models" ]]; then # Ser spesifikt etter en 'models' undermappe
+            # Sjekk om stien direkte har en 'models' undermappe ELLER om det er Docker data mappen som har det
+            if [[ -d "$normalized_path/models" ]]; then
                 if ! printf '%s\0' "${found_paths[@]}" | grep -Fxqz -- "$normalized_path"; then
                     found_paths+=("$normalized_path")
                 fi
-            elif [[ "$normalized_path" == "$BASE_DOCKER_SETUP_DIR/$COMFYUI_DATA_DIR_NAME" ]] && [[ -d "$normalized_path/models" ]]; then # Spesialtilfelle for Docker-data
-                 if ! printf '%s\0' "${found_paths[@]}" | grep -Fxqz -- "$normalized_path"; then
-                    found_paths+=("$normalized_path")
+            # Håndter tilfellet der path_found er f.eks. comfyui_unified_setup, og vi må se inni comfyui_data
+            elif [[ "$normalized_path" == "$BASE_DOCKER_SETUP_DIR" ]] && [[ -d "$BASE_DOCKER_SETUP_DIR/$COMFYUI_DATA_DIR_NAME/models" ]]; then
+                local docker_data_models_path="$BASE_DOCKER_SETUP_DIR/$COMFYUI_DATA_DIR_NAME"
+                 if ! printf '%s\0' "${found_paths[@]}" | grep -Fxqz -- "$docker_data_models_path"; then
+                    found_paths+=("$docker_data_models_path") # Legg til .../comfyui_data stien
                 fi
             fi
         done
     done
+
     if [ ${#found_paths[@]} -eq 0 ]; then
         log_warn "Ingen ComfyUI-stier funnet automatisk."
     else
@@ -315,37 +326,395 @@ md_find_and_select_comfyui_path() {
         done
         if [ "$choice_val" -le ${#found_paths[@]} ]; then MD_COMFYUI_PATH="${found_paths[$((choice_val-1))]}"; fi
     fi
-    while [[ -z "$MD_COMFYUI_PATH" ]]; do
+
+    while [[ -z "$MD_COMFYUI_PATH" ]]; do # Loop til vi får en gyldig sti
         read -r -e -p "Oppgi full sti til din ComfyUI data mappe (den som inneholder 'models'): " manual_path </dev/tty
         manual_path="${manual_path%/}" 
-        if [[ -d "$manual_path" ]] && [[ -d "$manual_path/models" ]]; then MD_COMFYUI_PATH="$manual_path";
-        else log_error "Stien '$manual_path' er ugyldig eller mangler 'models'-mappe."; fi
+        if [[ -d "$manual_path" ]] && [[ -d "$manual_path/models" ]]; then
+            MD_COMFYUI_PATH="$manual_path"
+        else
+            log_error "Stien '$manual_path' er ugyldig eller mangler 'models'-undermappe. Prøv igjen."
+        fi
     done
-    MD_COMFYUI_BASE_MODELS_PATH="$MD_COMFYUI_PATH/models"
-    if [ ! -d "$MD_COMFYUI_BASE_MODELS_PATH" ]; then log_error "FEIL: Mappen '$MD_COMFYUI_BASE_MODELS_PATH' ble ikke funnet!"; return 1; fi
+
+    MD_COMFYUI_BASE_MODELS_PATH="$MD_COMFYUI_PATH/models" # Sett denne uansett etter løkken
+    if [ ! -d "$MD_COMFYUI_BASE_MODELS_PATH" ]; then 
+        log_error "FEIL: Mappen '$MD_COMFYUI_BASE_MODELS_PATH' ble ikke funnet etter stivalg!"
+        return 1
+    fi
     log_success "Bruker '$MD_COMFYUI_BASE_MODELS_PATH' for modeller."; return 0
 }
 
-md_get_links_from_url() { local url="$1"; curl --connect-timeout 5 -s -L -f "$url" 2>/dev/null | grep -o '<a href="[^"]*"' | sed 's/<a href="//;s/"//' | grep -v '^$' | grep -E -v '(\.\.\/|Parent Directory|^\?|^\.|apache\.org|速度|名称|修改日期|大小)' || echo ""; }
-md_download_file() { local S="$1" T="$2" D=$(dirname "$T") F=$(basename "$T"); log_info "Laster ned '$F' fra $S til $T"; if [ ! -d "$D" ]; then log_warn "Mappe '$D' finnes ikke. Oppretter..."; if ! mkdir -p "$D"; then log_error "Kunne ikke opprette '$D'."; return 1; fi; fi; if wget -c -O "$T" "$S" -q --show-progress --progress=bar:force 2>&1; then log_success "Nedlasting '$F' OK!"; if [ -f "$T" ]; then local FS=$(stat -c%s "$T"); if [ "$FS" -lt 10000 ]; then log_warn "Fil '$F' er liten ($FS bytes)."; fi; fi; return 0; else log_error "Nedlasting '$F' FEIL."; rm -f "$T"; return 1; fi; }
-md_handle_package_download() { clear; echo "--- Last ned Modellpakke ---"; log_info "Henter fra $MD_PACKAGES_JSON_URL..."; local J=$(curl -sL --connect-timeout 10 -f "$MD_PACKAGES_JSON_URL"); if [ $? -ne 0 ]; then log_error "Kunne ikke hente pakker."; press_enter_to_continue; return 1; fi; if ! echo "$J" | jq -e . >/dev/null 2>&1; then log_error "Pakke-JSON ugyldig."; press_enter_to_continue; return 1; fi; mapfile -t Pdns < <(echo "$J" | jq -r '.packages[].displayName'); if [ ${#Pdns[@]} -eq 0 ]; then log_warn "Ingen pakker."; press_enter_to_continue; return 0; fi; echo "Pakker:"; for i in "${!Pdns[@]}"; do echo " $((i+1))) ${Pdns[$i]}"; done; echo " $((${#Pdns[@]}+1))) Tilbake"; local Pci; while true; do read -r -p "Velg (1-$((${#Pdns[@]}+1))): " Pci </dev/tty; if [[ "$Pci" =~ ^[0-9]+$ && "$Pci" -ge 1 && "$Pci" -le $((${#Pdns[@]}+1)) ]]; then break; else log_warn "Ugyldig."; fi; done; if [ "$Pci" -eq $((${#Pdns[@]}+1)) ]; then return 0; fi; local Spi=$((Pci-1)); mapfile -t Ftd < <(echo "$J" | jq -r --argjson idx "$Spi" '.packages[$idx].files[]'); if [ ${#Ftd[@]} -eq 0 ]; then log_warn "Ingen filer i pakken."; press_enter_to_continue; return 0; fi; log_info "Pakke: ${Pdns[$Spi]}"; echo "Filer:"; for Frp in "${Ftd[@]}"; do echo "  - $Frp"; done; read -r -p "Fortsett? (j/n): " Cdl </dev/tty; if [[ ! "$Cdl" =~ ^[Jj]$ ]]; then return 0; fi; local Dc=0 Sc=0 Fc=0; for Frp in "${Ftd[@]}"; do local Su="${MD_SERVER_BASE_URL}${Frp}"; local Tp="${MD_COMFYUI_BASE_MODELS_PATH}/${Frp}"; if [ -f "$Tp" ]; then read -r -p "Fil '$(basename "$Frp")' finnes. Overskriv? (j/N): " Orp </dev/tty; if [[ ! "$Orp" =~ ^[Jj]$ ]]; then log_info "Hopper over."; Sc=$((Sc+1)); continue; fi; fi; if md_download_file "$Su" "$Tp"; then Dc=$((Dc+1)); else Fc=$((Fc+1)); fi; done; log_info "Ferdig. DL:$Dc, Skip:$Sc, Feil:$Fc."; press_enter_to_continue; }
+md_get_links_from_url() {
+    local url="$1"
+    curl --connect-timeout 5 -s -L -f "$url" 2>/dev/null | \
+    grep -o '<a href="[^"]*"' | \
+    sed 's/<a href="//;s/"//' | \
+    grep -v '^$' | \
+    grep -E -v '(\.\.\/|Parent Directory|^\?|^\.|apache\.org|速度|名称|修改日期|大小)' || echo "" 
+}
+
+md_download_file() {
+    local source_url="$1"
+    local target_path="$2"
+    local target_dir
+    target_dir=$(dirname "$target_path")
+    local target_filename
+    target_filename=$(basename "$target_path")
+
+    log_info "Forbereder nedlasting av '$target_filename'"
+    echo "     Fra: $source_url"
+    echo "     Til: $target_path"
+
+    if [ ! -d "$target_dir" ]; then
+      log_warn "Målmappen '$target_dir' eksisterer ikke. Oppretter den..."
+      if ! mkdir -p "$target_dir"; then
+        log_error "Kunne ikke opprette mappen '$target_dir'. Hopper over nedlasting."
+        return 1
+      fi
+    fi
+
+    log_info "Starter nedlasting med wget..."
+    if wget -c -O "$target_path" "$source_url" -q --show-progress --progress=bar:force 2>&1; then
+      log_success "Nedlasting av '$target_filename' fullført!"
+      if [ -f "$target_path" ]; then
+         local filesize
+         filesize=$(stat -c%s "$target_path")
+         if [ "$filesize" -lt 10000 ]; then
+           log_warn "Nedlastet fil '$target_filename' er liten ($filesize bytes). Den kan være en feilrespons fra serveren."
+         else
+           echo "  Nedlastet filstørrelse: $filesize bytes."
+         fi
+      else
+          log_warn "Nedlasting rapporterte suksess, men filen '$target_path' ble ikke funnet."
+      fi
+      return 0
+    else
+      log_error "Nedlasting av '$target_filename' mislyktes."
+      log_error "Sjekk nettverkstilkobling og tilgangen til kilde-URL-en."
+      rm -f "$target_path" 
+      return 1
+    fi
+}
+
+md_handle_package_download() {
+    clear
+    echo "--- Last ned Modellpakke ---"
+    log_info "Henter pakkedefinisjoner fra $MD_PACKAGES_JSON_URL..."
+
+    local packages_json
+    packages_json=$(curl --connect-timeout 10 -s -L -f "$MD_PACKAGES_JSON_URL")
+    local curl_exit_code=$?
+
+    if [ $curl_exit_code -ne 0 ]; then
+        log_error "Kunne ikke hente pakkedefinisjonsfilen fra $MD_PACKAGES_JSON_URL."
+        log_error "Curl feilkode: $curl_exit_code. Sjekk URL og nettverkstilkobling."
+        press_enter_to_continue
+        return 1
+    fi
+
+    if ! echo "$packages_json" | jq -e . > /dev/null 2>&1; then
+        log_error "Pakkedefinisjonsfilen fra $MD_PACKAGES_JSON_URL er ikke gyldig JSON."
+        log_error "Innhold mottatt (første 200 tegn): $(echo "$packages_json" | head -c 200)"
+        press_enter_to_continue
+        return 1
+    fi
+    
+    mapfile -t package_display_names < <(echo "$packages_json" | jq -r '.packages[].displayName')
+
+    if [ ${#package_display_names[@]} -eq 0 ]; then
+        log_warn "Ingen modellpakker funnet i $MD_PACKAGES_JSON_URL eller filen er tom/feilformatert."
+        press_enter_to_continue
+        return 0
+    fi
+
+    echo "Tilgjengelige modellpakker:"
+    for i in "${!package_display_names[@]}"; do
+        echo "  $((i+1))) ${package_display_names[$i]}"
+    done
+    echo "  $((${#package_display_names[@]}+1))) Tilbake til meny"
+
+    local package_choice_idx
+    while true; do
+        read -r -p "Velg en pakke (1-$((${#package_display_names[@]}+1))): " package_choice_idx </dev/tty
+        if [[ "$package_choice_idx" =~ ^[0-9]+$ ]] && [ "$package_choice_idx" -ge 1 ] && [ "$package_choice_idx" -le $((${#package_display_names[@]}+1)) ]; then
+            break
+        else
+            log_warn "Ugyldig valg."
+        fi
+    done
+
+    if [ "$package_choice_idx" -eq $((${#package_display_names[@]}+1)) ]; then
+        return 0 
+    fi
+
+    local selected_package_index=$((package_choice_idx - 1)) 
+    local selected_package_display_name="${package_display_names[$selected_package_index]}"
+
+    mapfile -t package_files_to_download < <(echo "$packages_json" | jq -r --argjson idx "$selected_package_index" '.packages[$idx].files[]')
+
+    if [ ${#package_files_to_download[@]} -eq 0 ]; then
+        log_warn "Ingen filer er definert for pakken '$selected_package_display_name' i JSON-filen."
+        press_enter_to_continue
+        return 0
+    fi
+
+    log_info "Du har valgt å laste ned pakken: $selected_package_display_name"
+    echo "Følgende filer vil bli lastet ned (hvis de ikke allerede finnes):"
+    for file_rel_path in "${package_files_to_download[@]}"; do
+        echo "  - $file_rel_path"
+    done
+    
+    read -r -p "Vil du fortsette med nedlastingen? (ja/nei): " confirm_download </dev/tty
+    if [[ ! "$confirm_download" =~ ^[Jj][Aa]$ ]]; then
+        log_info "Nedlasting av pakke avbrutt."
+        press_enter_to_continue
+        return 0
+    fi
+
+    local files_downloaded_count=0
+    local files_skipped_count=0
+    local files_failed_count=0
+
+    for file_relative_path in "${package_files_to_download[@]}"; do
+        local source_url="${MD_SERVER_BASE_URL}${file_relative_path}"
+        local target_path_locally="${MD_COMFYUI_BASE_MODELS_PATH}/${file_relative_path}"
+        local target_filename
+        target_filename=$(basename "$file_relative_path")
+        local target_dir_locally
+        target_dir_locally=$(dirname "$target_path_locally")
+
+        echo "" 
+        if [ -f "$target_path_locally" ]; then
+            log_warn "Filen '$target_filename' finnes allerede i '$target_dir_locally'."
+            local overwrite_choice_pkg
+            read -r -p "Vil du laste ned på nytt og overskrive? (ja/Nei, Enter for Nei): " overwrite_choice_pkg </dev/tty
+            overwrite_choice_pkg=${overwrite_choice_pkg:-N}
+            if [[ ! "$overwrite_choice_pkg" =~ ^[Jj][Aa]$ ]]; then
+                log_info "Skipper nedlasting av '$target_filename'."
+                files_skipped_count=$((files_skipped_count + 1))
+                continue
+            fi
+        fi
+        
+        if md_download_file "$source_url" "$target_path_locally"; then
+            files_downloaded_count=$((files_downloaded_count + 1))
+        else
+            files_failed_count=$((files_failed_count + 1))
+        fi
+    done
+
+    echo ""
+    log_success "Pakkenedlasting for '$selected_package_display_name' er fullført."
+    if [ "$files_downloaded_count" -gt 0 ]; then log_info "$files_downloaded_count fil(er) ble lastet ned."; fi
+    if [ "$files_skipped_count" -gt 0 ]; then log_info "$files_skipped_count fil(er) ble hoppet over."; fi
+    if [ "$files_failed_count" -gt 0 ]; then log_warn "$files_failed_count fil(er) kunne ikke lastes ned."; fi
+    press_enter_to_continue
+}
+
 
 run_model_downloader() {
     local preselected_path_for_data_dir="$1" 
-    if ! md_check_jq; then press_enter_to_continue; return 1; fi
-    if ! md_find_and_select_comfyui_path "$preselected_path_for_data_dir"; then log_error "Kan ikke sette ComfyUI models-sti."; press_enter_to_continue; return 1; fi
-    while true; do clear; echo "--- Modelldenedlastingsverktøy ---"; echo "Bruker: $MD_COMFYUI_BASE_MODELS_PATH"; echo "Server: $MD_SERVER_BASE_URL"; echo "----------------------------------"; echo "1) Utforsk enkeltfiler"; echo "2) Last ned alle manglende"; echo "3) Last ned pakke"; echo "4) Bytt ComfyUI models-mappe"; echo "5) Tilbake til hovedmeny"; local Mdc; read -r -p "Velg (1-5): " Mdc </dev/tty;
-        case "$Mdc" in
-            1) while true; do clear; echo "--Mapper på $MD_SERVER_BASE_URL--"; local Mlo; Mlo=$(md_get_links_from_url "$MD_SERVER_BASE_URL"); local Ml; Ml=$(echo "$Mlo" | grep '/$'); if [ -z "$Ml" ]; then log_warn "Ingen mapper."; sleep 1; break; fi; local Ma=(); while IFS= read -r l; do Ma+=("$l"); done <<< "$Ml"; echo "Mapper:"; for i in "${!Ma[@]}"; do echo "$((i+1))) ${Ma[$i]}"; done; echo "$((${#Ma[@]}+1))) Tilbake"; local Mc; while true; do read -r -p "Velg (1-$((${#Ma[@]}+1))): " Mc </dev/tty; if [[ "$Mc" =~ ^[0-9]+$ && "$Mc" -ge 1 && "$Mc" -le $((${#Ma[@]}+1)) ]]; then break; fi; done; if [ "$Mc" -eq $((${#Ma[@]}+1)) ]; then break; fi; local Sd="${Ma[$((Mc-1))]}";
-                while true; do clear; local Csdu="${MD_SERVER_BASE_URL}${Sd}"; echo "--Filer i $Csdu--"; local Flo; Flo=$(md_get_links_from_url "$Csdu"); local Flf; Flf=$(echo "$Flo" | grep -v '/$'); local Faf=(); if [ -n "$Flf" ]; then while IFS= read -r l; do Faf+=("$l"); done <<< "$Flf"; fi; if [ ${#Faf[@]} -eq 0 ]; then log_warn "Ingen filer."; else echo "Filer:"; for i in "${!Faf[@]}"; do echo "$((i+1))) ${Faf[$i]}"; done; fi; echo "$((${#Faf[@]}+1))) Tilbake"; local Fc_val; while true; do read -r -p "Velg (1-$((${#Faf[@]}+1))): " Fc_val </dev/tty; if [[ "$Fc_val" =~ ^[0-9]+$ && "$Fc_val" -ge 1 && "$Fc_val" -le $((${#Faf[@]}+1)) ]; then break; fi; done; if [ "$Fc_val" -eq $((${#Faf[@]}+1)) ]; then break; fi; local Sfn="${Faf[$((Fc_val-1))]}"; local Suf="$Csdu$Sfn"; local Tpf="$MD_COMFYUI_BASE_MODELS_PATH/$Sd$Sfn"; if [ -f "$Tpf" ]; then read -r -p "Finnes. Overskriv? (j/n):" Of </dev/tty; if [[ ! "$Of" =~ ^[Jj]$ ]]; then log_info "Hopper over."; continue; fi; fi; md_download_file "$Suf" "$Tpf"; read -r -p "Annen fil fra '$Sd'? (J/n): " Anf </dev/tty; Anf=${Anf:-j}; if [[ "$Anf" =~ ^[Nn]$ ]]; then break; fi; done;
-                read -r -p "Annen mappe? (J/n): " Anm </dev/tty; Anm=${Anm:-j}; if [[ "$Anm" =~ ^[Nn]$ ]]; then break; fi; done ;;
-            2) clear; echo "--Last ned alle manglende--"; read -r -p "Sikker? (j/n): " Ca </dev/tty; if [[ ! "$Ca" =~ ^[Jj]$ ]]; then log_info "Avbrutt."; continue; fi; local Mall_o; Mall_o=$(md_get_links_from_url "$MD_SERVER_BASE_URL"); local Mall; Mall=$(echo "$Mall_o" | grep '/$'); if [ -z "$Mall" ]; then log_warn "Ingen mapper."; else local Maa=(); while IFS= read -r l; do Maa+=("$l"); done <<< "$Mall"; for Csa in "${Maa[@]}"; do log_info "Sjekker: $Csa"; local Foa; Foa=$(md_get_links_from_url "$MD_SERVER_BASE_URL$Csa"); local Ffa; Ffa=$(echo "$Foa" | grep -v '/$'); if [ -z "$Ffa" ]; then log_info " Ingen filer."; continue; fi; local Fada=(); while IFS= read -r l; do Fada+=("$l"); done <<< "$Ffa"; for Cfna in "${Fada[@]}"; do local Tpa="$MD_COMFYUI_BASE_MODELS_PATH/$Csa$Cfna"; if [ -f "$Tpa" ]; then echo "  Skipper: '$(basename "$Tpa")'"; else md_download_file "$MD_SERVER_BASE_URL$Csa$Cfna" "$Tpa"; fi; done; done; fi; log_success "Alle ferdig."; press_enter_to_continue ;;
-            3) md_handle_package_download ;;
-            4) MD_COMFYUI_PATH=""; MD_COMFYUI_BASE_MODELS_PATH=""; if ! md_find_and_select_comfyui_path ""; then log_error "Kunne ikke sette ny sti."; fi; press_enter_to_continue ;;
-            5) break ;;
-            *) log_warn "Ugyldig." ;;
-        esac; done; }
 
+    if ! md_check_jq; then press_enter_to_continue; return 1; fi
+    
+    # Forsøk å sette sti, hvis det feiler, ikke gå inn i menyen
+    if ! md_find_and_select_comfyui_path "$preselected_path_for_data_dir"; then
+        log_error "Kunne ikke bestemme ComfyUI models-sti for nedlasting. Går tilbake til hovedmeny."
+        press_enter_to_continue
+        return 1
+    fi
+
+    local md_choice_val
+    while true; do
+        clear
+        echo "--- Modelldenedlastingsverktøy ---"
+        echo "Bruker ComfyUI models-mappe: $MD_COMFYUI_BASE_MODELS_PATH"
+        echo "Modellserver: $MD_SERVER_BASE_URL"
+        echo "----------------------------------"
+        echo "1) Utforsk mapper og last ned enkeltfiler"
+        echo "2) Last ned alle modeller som ikke finnes lokalt"
+        echo "3) Last ned forhåndsdefinert modellpakke"
+        echo "4) Bytt ComfyUI models-mappe"
+        echo "5) Tilbake til hovedmeny"
+        
+        read -r -p "Velg et alternativ (1-5): " md_choice_val </dev/tty
+        case "$md_choice_val" in
+            1) # Utforsk enkeltfiler
+                local map_choice_val
+                while true; do # Mappevalg-løkke
+                    clear
+                    echo "--- Utforsker Mapper på Server: $MD_SERVER_BASE_URL ---"
+                    log_info "Henter liste over undermapper fra $MD_SERVER_BASE_URL..."
+                    local map_links_output_val
+                    map_links_output_val=$(md_get_links_from_url "$MD_SERVER_BASE_URL")
+                    local map_links_val
+                    map_links_val=$(echo "$map_links_output_val" | grep '/$' ) 
+
+                    if [ -z "$map_links_val" ]; then
+                        log_warn "Fant ingen undermapper på $MD_SERVER_BASE_URL."
+                        log_warn "Sjekk URL og serverkonfigurasjon. Går tilbake..."
+                        sleep 2; break 
+                    fi
+
+                    local map_array_val=()
+                    while IFS= read -r line; do map_array_val+=("$line"); done <<< "$map_links_val"
+                    local num_maps_val=${#map_array_val[@]}
+
+                    echo "Tilgjengelige mapper på serveren:"
+                    for i in "${!map_array_val[@]}"; do echo "  $((i+1))) ${map_array_val[$i]}"; done
+                    echo "  $((num_maps_val+1))) Gå tilbake til modelldownloader-meny"
+
+                    while true; do
+                        read -r -p "Velg en mappe å utforske (1-$((num_maps_val+1))): " map_choice_val </dev/tty
+                        if [[ "$map_choice_val" =~ ^[0-9]+$ ]] && [ "$map_choice_val" -ge 1 ] && [ "$map_choice_val" -le "$((num_maps_val+1))" ]; then break; else log_warn "Ugyldig valg."; fi
+                    done
+
+                    if [ "$map_choice_val" -eq "$((num_maps_val+1))" ]; then break; fi # Tilbake til modelldownloader-meny
+
+                    local selected_server_subdir_val="${map_array_val[$((map_choice_val-1))]}"
+                    
+                    local file_choice_val
+                    while true; do # Filvalg-løkke
+                        clear
+                        local current_server_dir_url_val="${MD_SERVER_BASE_URL}${selected_server_subdir_val}"
+                        echo "--- Utforsker Filer i: $current_server_dir_url_val ---"
+                        log_info "Henter liste over filer..."
+                        
+                        local file_links_output_val
+                        file_links_output_val=$(md_get_links_from_url "$current_server_dir_url_val")
+                        local file_links_f_val
+                        file_links_f_val=$(echo "$file_links_output_val" | grep -v '/$') # Kun filer
+
+                        local file_array_f_val=()
+                        if [ -n "$file_links_f_val" ]; then
+                             while IFS= read -r line; do file_array_f_val+=("$line"); done <<< "$file_links_f_val"
+                        fi
+                        local num_files_val=${#file_array_f_val[@]}
+
+                        if [ $num_files_val -eq 0 ]; then
+                            log_warn "Fant ingen filer i '$selected_server_subdir_val'."
+                        else
+                            echo "Tilgjengelige filer:"
+                            for i in "${!file_array_f_val[@]}"; do echo "  $((i+1))) ${file_array_f_val[$i]}"; done
+                        fi
+                        echo "  $((num_files_val+1))) Gå tilbake til mappevalg"
+
+                        while true; do
+                             read -r -p "Velg en fil å laste ned (1-$((num_files_val+1))): " file_choice_val </dev/tty
+                             if [[ "$file_choice_val" =~ ^[0-9]+$ ]] && [ "$file_choice_val" -ge 1 ] && [ "$file_choice_val" -le "$((num_files_val+1))" ]; then break; else log_warn "Ugyldig valg."; fi
+                        done
+
+                        if [ "$file_choice_val" -eq "$((num_files_val+1))" ]; then break; fi # Tilbake til mappevalg
+
+                        local selected_filename_val="${file_array_f_val[$((file_choice_val-1))]}"
+                        local source_url_f_val="$current_server_dir_url_val$selected_filename_val"
+                        # Server subdir har / på slutten, filnavn ikke.
+                        local target_path_f_val="$MD_COMFYUI_BASE_MODELS_PATH/$selected_server_subdir_val$selected_filename_val"
+
+
+                        if [ -f "$target_path_f_val" ]; then
+                            log_warn "Filen '$selected_filename_val' finnes allerede."
+                            local overwrite_choice_f_val
+                            read -r -p "Vil du laste ned på nytt og overskrive? (ja/nei): " overwrite_choice_f_val </dev/tty
+                            if [[ ! "$overwrite_choice_f_val" =~ ^[Jj][Aa]$ ]]; then
+                                log_info "Skipper nedlasting."
+                                # Spør om å laste ned en annen fil fra samme mappe
+                                local another_file_same_folder_val
+                                read -r -p "Last ned en annen fil fra '$selected_server_subdir_val'? (ja/nei, Enter for ja): " another_file_same_folder_val </dev/tty
+                                another_file_same_folder_val=${another_file_same_folder_val:-j}
+                                if [[ "$another_file_same_folder_val" =~ ^[Nn][Ee][Ii]$ ]]; then break; fi # Tilbake til mappevalg
+                                continue # Fortsett filvalg-løkken
+                            fi
+                        fi
+                        
+                        md_download_file "$source_url_f_val" "$target_path_f_val"
+                        
+                        echo ""
+                        local another_file_choice_val
+                        read -r -p "Last ned en annen fil fra '$selected_server_subdir_val'? (ja/nei, Enter for ja): " another_file_choice_val </dev/tty
+                        another_file_choice_val=${another_file_choice_val:-j}
+                        if [[ "$another_file_choice_val" =~ ^[Nn][Ee][Ii]$ ]]; then break; fi # Tilbake til mappevalg
+                    done # Slutt på filvalg-løkke
+
+                    echo ""
+                    local another_folder_choice_val
+                    read -r -p "Utforske en annen mappe på serveren? (ja/nei, Enter for ja): " another_folder_choice_val </dev/tty
+                    another_folder_choice_val=${another_folder_choice_val:-j}
+                    if [[ "$another_folder_choice_val" =~ ^[Nn][Ee][Ii]$ ]]; then break; fi # Tilbake til modelldownloader-meny 
+                done # Slutt på mappevalg-løkke
+                ;;
+
+            2) # Last ned alle
+                clear
+                echo "--- Starter 'Last ned alle' prosess ---"
+                log_info "Sjekker alle mapper på $MD_SERVER_BASE_URL og laster ned manglende filer til '$MD_COMFYUI_BASE_MODELS_PATH/'..."
+                read -r -p "Dette kan ta lang tid. Er du sikker? (ja/nei): " confirm_all_val </dev/tty
+                if [[ ! "$confirm_all_val" =~ ^[Jj][Aa]$ ]]; then
+                    log_info "Avbrutt av bruker."
+                    press_enter_to_continue
+                    continue 
+                fi
+
+                local map_links_output_all_val
+                map_links_output_all_val=$(md_get_links_from_url "$MD_SERVER_BASE_URL")
+                local map_links_all_val
+                map_links_all_val=$(echo "$map_links_output_all_val" | grep '/$' )
+
+                if [ -z "$map_links_all_val" ]; then
+                    log_warn "Fant ingen undermapper på $MD_SERVER_BASE_URL. Kan ikke laste ned alle."
+                else
+                    local map_array_all_val=()
+                    while IFS= read -r line; do map_array_all_val+=("$line"); done <<< "$map_links_all_val"
+                    log_info "Fant ${#map_array_all_val[@]} mapper å sjekke."
+
+                    for current_server_subdir_all_val in "${map_array_all_val[@]}"; do
+                        echo ""
+                        log_info "Sjekker mappe: $MD_SERVER_BASE_URL$current_server_subdir_all_val"
+                        local current_server_dir_url_all_val="${MD_SERVER_BASE_URL}${current_server_subdir_all_val}"
+                        
+                        local file_links_output_all_f_val
+                        file_links_output_all_f_val=$(md_get_links_from_url "$current_server_dir_url_all_val")
+                        local file_links_all_f_val
+                        file_links_all_f_val=$(echo "$file_links_output_all_f_val" | grep -v '/$')
+
+                        if [ -z "$file_links_all_f_val" ]; then
+                            log_info "  Ingen filer funnet i denne mappen på serveren."
+                            continue
+                        fi
+
+                        local file_array_dl_all_val=()
+                        while IFS= read -r line; do file_array_dl_all_val+=("$line"); done <<< "$file_links_all_f_val"
+                        log_info "  Fant ${#file_array_dl_all_val[@]} filer i '$current_server_subdir_all_val' på serveren."
+
+                        for current_filename_all_val in "${file_array_dl_all_val[@]}"; do
+                            local target_path_locally_all_val="$MD_COMFYUI_BASE_MODELS_PATH/$current_server_subdir_all_val$current_filename_all_val"
+                            local source_url_all_val="$current_server_dir_url_all_val$current_filename_all_val"
+
+                            if [ -f "$target_path_locally_all_val" ]; then
+                                echo "  Skipper: '$current_filename_all_val' finnes allerede lokalt."
+                            else
+                                md_download_file "$source_url_all_val" "$target_path_locally_all_val"
+                            fi
+                        done
+                    done
+                    log_success "Automatisk nedlastingsprosess fullført."
+                fi
+                press_enter_to_continue
+                ;;
+            3) md_handle_package_download ;;
+            4) # Bytt ComfyUI models-mappe
+                MD_COMFYUI_PATH="" 
+                MD_COMFYUI_BASE_MODELS_PATH=""
+                if ! md_find_and_select_comfyui_path ""; then 
+                    log_error "Kunne ikke sette ny ComfyUI models-sti."
+                fi
+                press_enter_to_continue ;;
+            5) break ;; # Tilbake til hovedmeny (main_menu)
+            *) log_warn "Ugyldig valg." ;;
+        esac
+    done
+}
 # --- Hovedmeny Funksjon ---
 main_menu() {
     initialize_docker_paths 
