@@ -16,7 +16,7 @@ COMFYUI_IMAGE_NAME="comfyui-app"
 DOCKER_CUDA_DEVEL_TAG="12.4.1-cudnn-devel-ubuntu22.04"
 # !! VIKTIG: VERIFISER DENNE RUNTIME-TAGGEN PÅ NVIDIA NGC !!
 # Det kan være f.eks. "12.4.1-base-ubuntu22.04" eller lignende hvis "-cudnn-runtime-" ikke finnes.
-DOCKER_CUDA_RUNTIME_TAG="nvcr.io/nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04"
+DOCKER_CUDA_RUNTIME_TAG="12.4.1-cudnn-runtime-ubuntu22.04"
 
 # For Model Downloader (MD)
 MD_SERVER_BASE_URL="http://192.168.1.29:8081/models/"
