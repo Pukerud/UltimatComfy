@@ -68,24 +68,35 @@ build_comfyui_image() {
     fi
 
     log_info "Starter bygging av Docker-image '$COMFYUI_IMAGE_NAME'..."
-    log_info "DEBUG FØR BUILD: DOCKER_CUDA_DEVEL_TAG er satt til: [$DOCKER_CUDA_DEVEL_TAG]"
-    log_info "DEBUG FØR BUILD: DOCKER_CUDA_RUNTIME_TAG er satt til: [$DOCKER_CUDA_RUNTIME_TAG]"
-    log_info "Bruker devel tag: $DOCKER_CUDA_DEVEL_TAG"
-    log_info "Bruker runtime tag: $DOCKER_CUDA_RUNTIME_TAG"
+
+    # RENSING AV TAG-VERDIER
+    local clean_devel_tag
+    clean_devel_tag=$(echo -n "$DOCKER_CUDA_DEVEL_TAG" | tr -d '\r\t' | sed 's/[[:space:]]*$//' | sed 's/^[[:space:]]*//') # Fjerner også ledende/følgende mellomrom
+    local clean_runtime_tag
+    clean_runtime_tag=$(echo -n "$DOCKER_CUDA_RUNTIME_TAG" | tr -d '\r\t' | sed 's/[[:space:]]*$//' | sed 's/^[[:space:]]*//')
+
+
+    log_info "DEBUG FØR BUILD (Original): DOCKER_CUDA_DEVEL_TAG er satt til: [$DOCKER_CUDA_DEVEL_TAG]"
+    log_info "DEBUG FØR BUILD (Original): DOCKER_CUDA_RUNTIME_TAG er satt til: [$DOCKER_CUDA_RUNTIME_TAG]"
+    log_info "DEBUG FØR BUILD (Renset): clean_devel_tag er satt til: [$clean_devel_tag]"
+    log_info "DEBUG FØR BUILD (Renset): clean_runtime_tag er satt til: [$clean_runtime_tag]"
+
+    log_info "Bruker devel tag: $clean_devel_tag"
+    log_info "Bruker runtime tag: $clean_runtime_tag"
     log_info "Dette kan ta en stund."
 
     log_info "TRYKK ENTER FOR Å STARTE BYGGING ETTER Å HA SETT DEBUG-INFO OVENFOR..."
     press_enter_to_continue
 
-    # Bygg build-argumentene med printf for å være helt sikker på formateringen
+    # Bygg build-argumentene med printf og rensede verdier
     local build_arg_devel
-    build_arg_devel=$(printf '%s=%s' "PASSED_CUDA_DEVEL_TAG" "$DOCKER_CUDA_DEVEL_TAG")
+    build_arg_devel=$(printf '%s=%s' "PASSED_CUDA_DEVEL_TAG" "$clean_devel_tag")
     local build_arg_runtime
-    build_arg_runtime=$(printf '%s=%s' "PASSED_CUDA_RUNTIME_TAG" "$DOCKER_CUDA_RUNTIME_TAG")
+    build_arg_runtime=$(printf '%s=%s' "PASSED_CUDA_RUNTIME_TAG" "$clean_runtime_tag")
 
     log_info "DEBUG: Bygger med arg devel: [--build-arg $build_arg_devel]"
     log_info "DEBUG: Bygger med arg runtime: [--build-arg $build_arg_runtime]"
-    press_enter_to_continue # Ekstra pause for å se de genererte argumentene
+    press_enter_to_continue 
 
     if docker build -t "$COMFYUI_IMAGE_NAME" \
         --build-arg "$build_arg_devel" \
