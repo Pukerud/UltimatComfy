@@ -172,7 +172,7 @@ WORKDIR /app/ComfyUI
 RUN mkdir -p ./models ./input ./output ./temp /cache/huggingface /cache/torch /cache/whisperx
 ENV HF_HOME="/cache/huggingface"
 ENV TORCH_HOME="/cache/torch"
-ENV WHISPERX_CACHE_DIR="/cache/whisperx" # Bekreft denne variabelen for WhisperX
+ENV WHISPERX_CACHE_DIR="/cache/whisperx"
 ENV PATH="/opt/venv/bin:\$PATH"
 EXPOSE 8188
 CMD ["python3", "main.py", "--max-upload-size", "1000", "--listen", "0.0.0.0", "--port", "8188", "--preview-method", "auto"]
