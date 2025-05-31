@@ -14,8 +14,6 @@ COMFYUI_IMAGE_NAME="comfyui-app"
 
 # Definer de komplette image tag-delene her for klarhet
 DOCKER_CUDA_DEVEL_TAG="12.4.1-cudnn-devel-ubuntu22.04"
-# !! VIKTIG: VERIFISER DENNE RUNTIME-TAGGEN PÅ NVIDIA NGC !!
-# Det kan være f.eks. "12.4.1-base-ubuntu22.04" eller lignende hvis "-cudnn-runtime-" ikke finnes.
 DOCKER_CUDA_RUNTIME_TAG="12.4.1-cudnn-runtime-ubuntu22.04"
 
 # For Model Downloader (MD)
@@ -71,21 +69,34 @@ build_comfyui_image() {
 
     log_info "Starter bygging av Docker-image '$COMFYUI_IMAGE_NAME'..."
     log_info "DEBUG FØR BUILD: DOCKER_CUDA_DEVEL_TAG er satt til: [$DOCKER_CUDA_DEVEL_TAG]"
-    log_info "DEBUG FØR BUILD: DOCKER_CUDA_RUNTIME_TAG er satt til: [$DOCKER_CUDA_RUNTIME_TAG] (VERIFISER DENNE!)"
+    log_info "DEBUG FØR BUILD: DOCKER_CUDA_RUNTIME_TAG er satt til: [$DOCKER_CUDA_RUNTIME_TAG]"
+    log_info "Bruker devel tag: $DOCKER_CUDA_DEVEL_TAG"
+    log_info "Bruker runtime tag: $DOCKER_CUDA_RUNTIME_TAG"
     log_info "Dette kan ta en stund."
+
     log_info "TRYKK ENTER FOR Å STARTE BYGGING ETTER Å HA SETT DEBUG-INFO OVENFOR..."
     press_enter_to_continue
 
+    # Bygg build-argumentene med printf for å være helt sikker på formateringen
+    local build_arg_devel
+    build_arg_devel=$(printf '%s=%s' "PASSED_CUDA_DEVEL_TAG" "$DOCKER_CUDA_DEVEL_TAG")
+    local build_arg_runtime
+    build_arg_runtime=$(printf '%s=%s' "PASSED_CUDA_RUNTIME_TAG" "$DOCKER_CUDA_RUNTIME_TAG")
+
+    log_info "DEBUG: Bygger med arg devel: [--build-arg $build_arg_devel]"
+    log_info "DEBUG: Bygger med arg runtime: [--build-arg $build_arg_runtime]"
+    press_enter_to_continue # Ekstra pause for å se de genererte argumentene
+
     if docker build -t "$COMFYUI_IMAGE_NAME" \
-        --build-arg PASSED_CUDA_DEVEL_TAG="$DOCKER_CUDA_DEVEL_TAG" \
-        --build-arg PASSED_CUDA_RUNTIME_TAG="$DOCKER_CUDA_RUNTIME_TAG" \
+        --build-arg "$build_arg_devel" \
+        --build-arg "$build_arg_runtime" \
         "$DOCKER_CONFIG_ACTUAL_PATH"; then
         log_success "Docker-image '$COMFYUI_IMAGE_NAME' bygget/oppdatert vellykket."
         return 0
     else
         log_error "Bygging av Docker-image mislyktes."
         log_error "FEIL UNDER DOCKER BUILD. TRYKK ENTER FOR Å GÅ TILBAKE TIL MENY."
-        press_enter_to_continue
+        press_enter_to_continue 
         return 1
     fi
 }
