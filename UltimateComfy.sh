@@ -1,5 +1,5 @@
 #!/bin/bash
-# Kombinert skript for ComfyUI Docker Oppsett og Modelldenedlasting       v2
+# Kombinert skript for ComfyUI Docker Oppsett og Modelldenedlasting       v3
 
 # --- Globale Innstillinger og Konstanter ---
 # Farger for logging
@@ -100,8 +100,7 @@ build_comfyui_image() {
     press_enter_to_continue 
 
     if docker build -t "$COMFYUI_IMAGE_NAME" \
-        --build-arg "$build_arg_devel" \
-        # --build-arg "$build_arg_runtime" \ # FJERNET DENNE LINJEN
+        --build-arg "$build_arg_devel" \        
         "$DOCKER_CONFIG_ACTUAL_PATH"; then
         log_success "Docker-image '$COMFYUI_IMAGE_NAME' bygget/oppdatert vellykket."
         return 0
