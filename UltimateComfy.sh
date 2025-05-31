@@ -1,5 +1,5 @@
 #!/bin/bash
-# Kombinert skript for ComfyUI Docker Oppsett og Modelldenedlasting
+# Kombinert skript for ComfyUI Docker Oppsett og Modelldenedlasting       v2
 
 # --- Globale Innstillinger og Konstanter ---
 # Farger for logging
@@ -101,7 +101,7 @@ build_comfyui_image() {
 
     if docker build -t "$COMFYUI_IMAGE_NAME" \
         --build-arg "$build_arg_devel" \
-        --build-arg "$build_arg_runtime" \
+        # --build-arg "$build_arg_runtime" \ # FJERNET DENNE LINJEN
         "$DOCKER_CONFIG_ACTUAL_PATH"; then
         log_success "Docker-image '$COMFYUI_IMAGE_NAME' bygget/oppdatert vellykket."
         return 0
@@ -177,7 +177,7 @@ perform_docker_initial_setup() {
     printf '\n'
     printf '%s\n' '# Stage 2: Runtime'
     printf 'ARG %s\n' "PASSED_CUDA_RUNTIME_TAG"
-    printf 'FROM nvcr.io/nvidia/cuda:%s AS runtime\n' '${PASSED_CUDA_RUNTIME_TAG}'
+    printf 'FROM nvcr.io/nvidia/cuda:%s AS runtime\n' "12.4.1-cudnn-runtime-ubuntu22.04"
     printf '\n'
     printf 'ENV %s\n' 'DEBIAN_FRONTEND=noninteractive'
     # Endret til de.archive.ubuntu.com og de.security.ubuntu.com også her
