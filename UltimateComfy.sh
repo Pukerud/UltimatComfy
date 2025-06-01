@@ -359,6 +359,21 @@ install_comfyui_manager_on_host() {
         return 1
     fi
 
+    # Check for git installation
+    if ! command -v git &> /dev/null; then
+        log_warn "git not found. Attempting to install..."
+        if sudo apt update && sudo apt install -y git; then
+            log_success "git installed successfully."
+            if ! command -v git &> /dev/null; then
+                log_error "git installation was reported as successful, but 'git' command is still not found. Please install git manually and try again."
+                return 1
+            fi
+        else
+            log_error "Failed to install git. Please install git manually and try again."
+            return 1
+        fi
+    fi
+
     log_info "Cloning ComfyUI-Manager to $manager_dir..."
     if git clone https://github.com/ltdrdata/ComfyUI-Manager.git "$manager_dir"; then
         log_success "ComfyUI-Manager cloned successfully to $manager_dir."
