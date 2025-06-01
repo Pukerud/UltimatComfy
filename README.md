@@ -35,37 +35,57 @@ When `--network host` is used, the Docker container shares the network stack of 
 **Note on Port Mapping (`-p`):**
 The script currently retains the `-p ${host_port}:8188` option in the `docker run` command. When `--network host` is used, explicit port mappings with `-p` are generally ignored or unnecessary. However, their presence shouldn't typically cause issues.
 
-## Usage
+## Getting Started & Usage
 
-1.  **Make the script executable:**
+This project now consists of multiple script files due to refactoring for better organization. To use `UltimateComfy.sh`, you first need to obtain all the necessary script files.
+
+**1. Download the Scripts:**
+
+*   **Recommended Method: `git clone`** (for easy updates)
     ```bash
+    git clone https://github.com/Pukerud/UltimatComfy.git
+    cd UltimatComfy
     chmod +x UltimateComfy.sh
-    ```
-2.  **Run the script:**
-    ```bash
     ./UltimateComfy.sh
     ```
-3.  **Follow the on-screen menu options:**
+    *(The main `UltimateComfy.sh` script needs to be executable. The other `.sh` files (`common_utils.sh`, `docker_setup.sh`, `model_downloader.sh`) are sourced and do not strictly require execute permissions, but it's harmless to set them.)*
+
+    **For Existing Users (Updating an Existing Clone):**
+    If you have already cloned the repository, you can update to the latest version by navigating into the `UltimatComfy` directory and running `git pull`:
+    ```bash
+    cd UltimatComfy  # Ensure you are in the cloned directory
+    git pull
+    # Then run the script as usual
+    ./UltimateComfy.sh
+    ```
+
+*   **Alternative Method: Download Archive (Tar.gz)**
+    ```bash
+    curl -sSL -o UltimatComfy.tar.gz https://github.com/Pukerud/UltimatComfy/archive/refs/heads/main.tar.gz
+    tar -xzf UltimatComfy.tar.gz
+    # The extracted directory might be named UltimatComfy-main or similar
+    cd UltimatComfy-main
+    chmod +x UltimateComfy.sh
+    ./UltimateComfy.sh
+    ```
+
+**2. Follow the on-screen menu options:**
+    Once the script is running:
     *   **Option 1 (Førstegangs oppsett/Installer ComfyUI i Docker):** This should be your first step if you haven't set up ComfyUI with this script before. It will:
         *   Ask for the number of GPUs.
-        *   Create necessary directories under `$HOME/comfyui_unified_setup`.
-        *   Generate a `Dockerfile` in `$HOME/comfyui_unified_setup/docker_config`.
-        *   Build the Docker image named `comfyui-app`.
-        *   Generate `start_comfyui.sh` and `stop_comfyui.sh` scripts in `$HOME/comfyui_unified_setup/scripts/`. These scripts will include the `--network host` setting.
-    *   **Option 2 (Bygg/Oppdater ComfyUI Docker Image):** Use this to rebuild the Docker image if you've modified the Dockerfile or want to update ComfyUI.
-    *   **Option 3 (Last ned/Administrer Modeller):** Access the model downloader utility. You'll need to configure the ComfyUI data path if not automatically detected or set by Option 1.
-    *   **Option 4 (Start ComfyUI Docker Container(e)):** Runs the generated `start_comfyui.sh` script to start the container(s).
-    *   **Option 5 (Stopp ComfyUI Docker Container(e)):** Runs the generated `stop_comfyui.sh` script to stop and remove the container(s).
+        *   Create necessary directories (default: under `$HOME/comfyui_unified_setup`).
+        *   Generate a `Dockerfile`.
+        *   Build the Docker image.
+        *   Generate `start_comfyui.sh` and `stop_comfyui.sh` scripts.
+    *   **Option 2 (Bygg/Oppdater ComfyUI Docker Image):** Use this to rebuild the Docker image.
+    *   **Option 3 (Last ned/Administrer Modeller):** Access the model downloader utility.
+    *   **Option 4 (Start ComfyUI Docker Container(e)):** Runs the generated `start_comfyui.sh`.
+    *   **Option 5 (Stopp ComfyUI Docker Container(e)):** Runs the generated `stop_comfyui.sh`.
     *   **Option 6 (Avslutt):** Exits the script.
 
 ## Script Variables and Configuration
 
-The script uses several global variables for paths and settings, defined at the beginning of the file. These can be modified if needed:
-
--   `BASE_DOCKER_SETUP_DIR`: Default `$HOME/comfyui_unified_setup`. Base directory for all generated files and data.
--   `COMFYUI_IMAGE_NAME`: Default `comfyui-app`. Name of the Docker image to be built.
--   `DOCKER_CUDA_DEVEL_TAG`: CUDA version for the builder stage in the Dockerfile.
--   `MD_SERVER_BASE_URL` and `MD_PACKAGES_JSON_URL`: URLs for the model downloader.
+The script suite uses several global variables for paths and settings. Core constants are defined in `common_utils.sh`, Docker-specific variables in `docker_setup.sh`, and model downloader variables in `model_downloader.sh`. Some default paths are also set in `common_utils.sh` or the respective scripts.
 
 ## Important Considerations
 
