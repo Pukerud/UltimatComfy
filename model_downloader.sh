@@ -209,8 +209,6 @@ md_find_and_select_comfyui_path() {
 }
 
 md_get_links_from_url() {
-
-md_get_links_from_url() {
     script_log "DEBUG: ENTERING md_get_links_from_url (model_downloader.sh) for URL: $1"
     local url="$1"
     # Added timeout and error resilience for curl
