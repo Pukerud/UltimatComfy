@@ -336,8 +336,9 @@ install_comfyui_manager_on_host() {
         read -r -p "ComfyUI-Manager already exists at $manager_dir. Reinstall? (ja/nei): " reinstall_choice </dev/tty
         if [[ "$reinstall_choice" =~ ^[Jj][Aa]$ ]]; then
             log_info "Removing existing ComfyUI-Manager for reinstall..."
-            if ! rm -rf "$manager_dir"; then
-                log_error "Failed to remove existing ComfyUI-Manager directory. Please check permissions."
+            log_info "Attempting to remove with sudo due to potential permission issues..."
+            if ! sudo rm -rf "$manager_dir"; then
+                log_error "Failed to remove existing ComfyUI-Manager directory. Please check permissions and sudo access."
                 return 1
             fi
             log_success "Existing ComfyUI-Manager removed."
