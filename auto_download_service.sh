@@ -140,9 +140,22 @@ _recursive_download_node_contents() {
 
             log_info "Downloading: $file_source_url to $file_local_target_path"
             wget -nv -O "$file_local_target_path" "$file_source_url"
-            if [ $? -ne 0 ]; then
-                script_log "ERROR: Failed to download file $decoded_item_name from $file_source_url to $file_local_target_path"
+            local wget_exit_code=$?
+            log_info "wget raw exit code for $decoded_item_name ($file_source_url): $wget_exit_code"
+            if [ $wget_exit_code -ne 0 ]; then
+                script_log "ERROR: wget download failed for $decoded_item_name from $file_source_url with exit code $wget_exit_code."
+                script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_target_path"):"
+                ls -lA "$(dirname "$file_local_target_path")" # Output goes to main service log via nohup
                 return 1
+            fi
+            # Verify file existence immediately after claimed successful download
+            if [ ! -f "$file_local_target_path" ]; then
+                script_log "CRITICAL_ERROR: File $file_local_target_path NOT FOUND immediately after wget reported success (exit code 0) for $decoded_item_name."
+                script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_target_path"):"
+                ls -lA "$(dirname "$file_local_target_path")" # Output goes to main service log via nohup
+                return 1 # Treat as a failure
+            else
+                log_info "VERIFIED: File $file_local_target_path exists after download for $decoded_item_name."
             fi
         fi
     done
@@ -315,9 +328,21 @@ download_model() {
 
                 log_info "Downloading: $file_source_url to $file_local_path"
                 wget -nv -O "$file_local_path" "$file_source_url"
-                if [ $? -ne 0 ]; then
-                    script_log "ERROR: Failed to download file $file_in_item_dir_decoded for model directory $decoded_item_name from $file_source_url"
-                    return 1 # Fail the whole directory download if one file fails
+                local wget_exit_code=$?
+                log_info "wget raw exit code for model file $file_in_item_dir_decoded ($file_source_url): $wget_exit_code"
+                if [ $wget_exit_code -ne 0 ]; then
+                    script_log "ERROR: wget download failed for model file $file_in_item_dir_decoded from $file_source_url with exit code $wget_exit_code."
+                    script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_path"):"
+                    ls -lA "$(dirname "$file_local_path")"
+                    return 1
+                fi
+                if [ ! -f "$file_local_path" ]; then
+                    script_log "CRITICAL_ERROR: Model file $file_local_path NOT FOUND immediately after wget reported success (exit code 0) for $file_in_item_dir_decoded."
+                    script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_path"):"
+                    ls -lA "$(dirname "$file_local_path")"
+                    return 1
+                else
+                    log_info "VERIFIED: Model file $file_local_path exists after download for $file_in_item_dir_decoded."
                 fi
             done
         else
@@ -336,9 +361,21 @@ download_model() {
         fi
 
         wget -nv -O "$local_item_path" "$source_item_url"
-        if [ $? -ne 0 ]; then
-            script_log "ERROR: Failed to download model file $decoded_item_name from $source_item_url"
+        local wget_exit_code=$?
+        log_info "wget raw exit code for single model $decoded_item_name ($source_item_url): $wget_exit_code"
+        if [ $wget_exit_code -ne 0 ]; then
+            script_log "ERROR: wget download failed for single model $decoded_item_name from $source_item_url with exit code $wget_exit_code."
+            script_log "DEBUG: Listing contents of target directory $(dirname "$local_item_path"):"
+            ls -lA "$(dirname "$local_item_path")"
             return 1
+        fi
+        if [ ! -f "$local_item_path" ]; then
+            script_log "CRITICAL_ERROR: Single model file $local_item_path NOT FOUND immediately after wget reported success (exit code 0) for $decoded_item_name."
+            script_log "DEBUG: Listing contents of target directory $(dirname "$local_item_path"):"
+            ls -lA "$(dirname "$local_item_path")"
+            return 1
+        else
+            log_info "VERIFIED: Single model file $local_item_path exists after download for $decoded_item_name."
         fi
         log_info "Successfully downloaded model file: $decoded_item_name"
         return 0
