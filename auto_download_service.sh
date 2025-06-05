@@ -69,57 +69,116 @@ check_for_new_nodes() {
     log_info "Finished checking for new nodes."
 }
 
-download_node() {
-    local node_name="$1"
-    log_info "Attempting to download node: $node_name"
-    local target_node_dir="$DOCKER_DATA_ACTUAL_PATH/custom_nodes/$node_name"
+_recursive_download_node_contents() {
+    local node_name="$1"                         # e.g., "ComfyUI-Crystools"
+    local current_server_relative_path="$2"      # e.g., "" or "js/" or "subfolder/js/" (must end with / if not empty for directories)
+    local current_local_node_base_path="$3"      # e.g., ".../custom_nodes/ComfyUI-Crystools" or ".../custom_nodes/ComfyUI-Crystools/js"
 
-    mkdir -p "$target_node_dir"
+    local full_server_url="$SERVER_BASE_URL$AUTO_NODES_PATH$node_name/$current_server_relative_path"
+    # Ensure trailing slash for directory URLs if current_server_relative_path is not empty and doesn't have one
+    if [ -n "$current_server_relative_path" ] && [[ "$full_server_url" != */ ]]; then
+        full_server_url+="/"
+    elif [ -z "$current_server_relative_path" ] && [[ "$full_server_url" != */ ]]; then # Top level node_name might not have slash
+         full_server_url+="/"
+    fi
+
+    log_info "Recursively processing server path: $full_server_url into local path: $current_local_node_base_path"
+
+    local server_items_raw
+    server_items_raw=$(curl -sL "$full_server_url" | grep -o '<a href="[^"]*"' | sed 's/<a href="//;s/"//' | grep -v '^\.\./$' | grep -v '^Parent directory$' | grep -E -v '^\?C=[A-Z];O=[A-Z]$')
+
     if [ $? -ne 0 ]; then
-        script_log "ERROR: Failed to create directory for node $node_name at $target_node_dir"
-        return 1
+        script_log "ERROR: curl failed to list items from $full_server_url"
+        return 1 # curl error
     fi
 
-    local node_files_raw
-    node_files_raw=$(curl -sL "$SERVER_BASE_URL$AUTO_NODES_PATH$node_name/" | grep -o '<a href="[^"]*"' | sed 's/<a href="//;s/"//' | grep -v '/$' | grep -v '^\.\./$' | grep -v '^Parent directory')
-
-    if [ $? -ne 0 ]; then
-        script_log "ERROR: Failed to retrieve file list for node $node_name from server."
-        # Consider removing $target_node_dir here if it's empty or download is considered failed
-        return 1
+    if [ -z "$server_items_raw" ]; then
+        log_info "No items (files or subdirectories) found in $full_server_url. Assuming empty directory or end of recursion branch."
+        return 0 # Successfully processed an empty directory
     fi
 
-    if [ -z "$node_files_raw" ]; then
-        log_info "No files found for node $node_name on the server. It might be an empty directory or a meta-directory."
-        # Depending on policy, this could be a success or failure. For now, assume it's not an error to find an empty node dir.
-        # If it was expected to have files, this might be 'return 1'
-        install_node_dependencies "$target_node_dir" # Call even if empty, in case of future structure
-        return 0
-    fi
+    mapfile -t server_items < <(echo "$server_items_raw")
 
-    mapfile -t node_files < <(echo "$node_files_raw")
+    for item_on_server in "${server_items[@]}"; do
+        local decoded_item_name
+        decoded_item_name=$(printf '%b' "${item_on_server//%/\\x}") # URL decode
 
-    log_info "Found ${#node_files[@]} files for node $node_name. Starting download..."
+        if [[ "$item_on_server" == */ ]]; then # It's a directory (original name from server ends with /)
+            log_info "Found directory: $decoded_item_name within $node_name/$current_server_relative_path"
+            local local_subdir_path="$current_local_node_base_path/$decoded_item_name"
+            # Ensure local_subdir_path also has a trailing slash if decoded_item_name had one.
+            # decoded_item_name should retain the trailing slash from item_on_server.
 
-    for file_in_node in "${node_files[@]}"; do
-        local source_url="$SERVER_BASE_URL$AUTO_NODES_PATH$node_name/$file_in_node"
-        local local_target_path="$target_node_dir/$file_in_node"
-        log_info "Downloading: $source_url to $local_target_path"
+            mkdir -p "$local_subdir_path" # mkdir -p handles trailing slash correctly
+            if [ $? -ne 0 ]; then
+                script_log "ERROR: Failed to create local directory $local_subdir_path"
+                return 1
+            fi
 
-        wget -nv -O "$local_target_path" "$source_url"
-        if [ $? -ne 0 ]; then
-            script_log "ERROR: Failed to download file $file_in_node for node $node_name from $source_url"
-            # Potentially remove $target_node_dir or specific file
-            return 1
+            # Recursive call:
+            # - current_server_relative_path appends the new directory (item_on_server, which includes its trailing /)
+            # - current_local_node_base_path is the newly created local_subdir_path (which should also have trailing slash if it's a dir)
+            if ! _recursive_download_node_contents "$node_name" "$current_server_relative_path$item_on_server" "$local_subdir_path"; then
+                script_log "ERROR: Recursive download failed for subdirectory $decoded_item_name of node $node_name."
+                return 1 # Propagate failure
+            fi
+        else # It's a file
+            log_info "Found file: $decoded_item_name within $node_name/$current_server_relative_path"
+            # Construct file source URL carefully: full_server_url already has node_name/current_server_relative_path/
+            # item_on_server is the filename itself from this level.
+            local file_source_url="$full_server_url$item_on_server"
+            local file_local_target_path="$current_local_node_base_path/$decoded_item_name"
+
+            # Ensure parent directory for the file exists
+            local file_parent_dir
+            file_parent_dir=$(dirname "$file_local_target_path")
+            mkdir -p "$file_parent_dir" # Should be redundant if current_local_node_base_path is correct, but safe
+            if [ $? -ne 0 ]; then
+                 script_log "ERROR: Failed to create parent directory $file_parent_dir for file $decoded_item_name"
+                 return 1
+            fi
+
+            log_info "Downloading: $file_source_url to $file_local_target_path"
+            wget -nv -O "$file_local_target_path" "$file_source_url"
+            if [ $? -ne 0 ]; then
+                script_log "ERROR: Failed to download file $decoded_item_name from $file_source_url to $file_local_target_path"
+                return 1
+            fi
         fi
     done
+    return 0 # All items in this directory processed successfully
+}
 
-    log_info "Successfully downloaded all files for node $node_name."
-    if install_node_dependencies "$target_node_dir"; then
-        return 0 # Success
+download_node() {
+    local node_name="$1" # This is just the top-level node directory name, e.g. "ComfyUI-Manager"
+    log_info "Attempting to download node: $node_name"
+    local target_node_top_level_dir="$DOCKER_DATA_ACTUAL_PATH/custom_nodes/$node_name"
+
+    # Create the top-level directory for the node
+    mkdir -p "$target_node_top_level_dir"
+    if [ $? -ne 0 ]; then
+        script_log "ERROR: Failed to create top-level directory for node $node_name at $target_node_top_level_dir"
+        return 1
+    fi
+
+    log_info "Starting recursive download for node $node_name into $target_node_top_level_dir"
+    # Initial call: current_server_relative_path is empty, current_local_node_base_path is the top-level dir
+    if ! _recursive_download_node_contents "$node_name" "" "$target_node_top_level_dir"; then
+        script_log "ERROR: Recursive download failed for node $node_name. Check previous logs for details."
+        # Consider cleaning up: rm -rf "$target_node_top_level_dir"
+        return 1 # Download part failed
+    fi
+
+    log_info "Successfully downloaded all contents for node $node_name."
+
+    # Proceed with dependency installation only if download was successful
+    if install_node_dependencies "$target_node_top_level_dir"; then
+        log_info "Dependencies installed (or not needed) for node $node_name."
+        return 0 # Success for both download and dependencies
     else
         script_log "ERROR: Failed to install dependencies for node $node_name."
-        return 1 # Failure
+        # Consider cleaning up: rm -rf "$target_node_top_level_dir"
+        return 1 # Dependencies part failed
     fi
 }
 
