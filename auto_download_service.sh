@@ -105,40 +105,43 @@ _recursive_download_node_contents() {
 
         if [[ "$item_on_server" == */ ]]; then # It's a directory (original name from server ends with /)
             log_info "Found directory: $decoded_item_name within $node_name/$current_server_relative_path"
-            local local_subdir_path="$current_local_node_base_path/$decoded_item_name"
-            # Ensure local_subdir_path also has a trailing slash if decoded_item_name had one.
-            # decoded_item_name should retain the trailing slash from item_on_server.
+            local raw_local_subdir_path="$current_local_node_base_path/$decoded_item_name"
+            local local_subdir_path
+            local_subdir_path=$(echo "$raw_local_subdir_path" | tr -s '/')
 
             mkdir -p "$local_subdir_path" # mkdir -p handles trailing slash correctly
             if [ $? -ne 0 ]; then
-                script_log "ERROR: Failed to create local directory $local_subdir_path"
+                script_log "ERROR: Failed to create local directory $local_subdir_path (raw: $raw_local_subdir_path)"
                 return 1
             fi
 
             # Recursive call:
             # - current_server_relative_path appends the new directory (item_on_server, which includes its trailing /)
-            # - current_local_node_base_path is the newly created local_subdir_path (which should also have trailing slash if it's a dir)
+            # - current_local_node_base_path is the newly created normalized local_subdir_path
             if ! _recursive_download_node_contents "$node_name" "$current_server_relative_path$item_on_server" "$local_subdir_path"; then
                 script_log "ERROR: Recursive download failed for subdirectory $decoded_item_name of node $node_name."
                 return 1 # Propagate failure
             fi
         else # It's a file
             log_info "Found file: $decoded_item_name within $node_name/$current_server_relative_path"
+            local raw_file_local_target_path="$current_local_node_base_path/$decoded_item_name"
+            local file_local_target_path
+            file_local_target_path=$(echo "$raw_file_local_target_path" | tr -s '/')
+
             # Construct file source URL carefully: full_server_url already has node_name/current_server_relative_path/
             # item_on_server is the filename itself from this level.
             local file_source_url="$full_server_url$item_on_server"
-            local file_local_target_path="$current_local_node_base_path/$decoded_item_name"
 
             # Ensure parent directory for the file exists
             local file_parent_dir
-            file_parent_dir=$(dirname "$file_local_target_path")
-            mkdir -p "$file_parent_dir" # Should be redundant if current_local_node_base_path is correct, but safe
+            file_parent_dir=$(dirname "$file_local_target_path") # Use normalized path to get dirname
+            mkdir -p "$file_parent_dir"
             if [ $? -ne 0 ]; then
-                 script_log "ERROR: Failed to create parent directory $file_parent_dir for file $decoded_item_name"
+                 script_log "ERROR: Failed to create parent directory $file_parent_dir (for raw path $raw_file_local_target_path) for file $decoded_item_name"
                  return 1
             fi
 
-            log_info "Downloading: $file_source_url to $file_local_target_path"
+            log_info "Downloading: $file_source_url to $file_local_target_path (raw: $raw_file_local_target_path)"
             wget -nv -O "$file_local_target_path" "$file_source_url"
             local wget_exit_code=$?
             log_info "wget raw exit code for $decoded_item_name ($file_source_url): $wget_exit_code"
@@ -150,12 +153,12 @@ _recursive_download_node_contents() {
             fi
             # Stricter verification: file must exist and be non-empty
             if [ ! -f "$file_local_target_path" ]; then
-                script_log "CRITICAL_ERROR: File $file_local_target_path NOT FOUND immediately after wget reported success (exit code 0) for $decoded_item_name."
+                script_log "CRITICAL_ERROR: File $file_local_target_path (raw: $raw_file_local_target_path) NOT FOUND immediately after wget reported success (exit code 0) for $decoded_item_name."
                 script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_target_path"):"
                 ls -lA "$(dirname "$file_local_target_path")"
                 return 1
             elif [ ! -s "$file_local_target_path" ]; then
-                script_log "CRITICAL_ERROR: File $file_local_target_path IS EMPTY immediately after wget reported success (exit code 0) for $decoded_item_name."
+                script_log "CRITICAL_ERROR: File $file_local_target_path (raw: $raw_file_local_target_path) IS EMPTY immediately after wget reported success (exit code 0) for $decoded_item_name."
                 script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_target_path"):"
                 ls -lA "$(dirname "$file_local_target_path")"
                 # Optionally remove the empty file: rm -f "$file_local_target_path"
@@ -163,7 +166,7 @@ _recursive_download_node_contents() {
             else
                 local file_size
                 file_size=$(stat -c%s "$file_local_target_path")
-                log_info "VERIFIED: File $file_local_target_path exists, is not empty, and has size $file_size bytes after download for $decoded_item_name."
+                log_info "VERIFIED: File $file_local_target_path (raw: $raw_file_local_target_path) exists, is not empty, and has size $file_size bytes after download for $decoded_item_name."
             fi
         fi
     done
@@ -173,7 +176,11 @@ _recursive_download_node_contents() {
 download_node() {
     local node_name="$1" # This is just the top-level node directory name, e.g. "ComfyUI-Manager"
     log_info "Attempting to download node: $node_name"
-    local target_node_top_level_dir="$DOCKER_DATA_ACTUAL_PATH/custom_nodes/$node_name"
+    # target_node_top_level_dir should not have a trailing slash for consistent processing with tr -s '/' later
+    local target_node_top_level_dir
+    target_node_top_level_dir="$DOCKER_DATA_ACTUAL_PATH/custom_nodes/$node_name"
+    target_node_top_level_dir=$(echo "$target_node_top_level_dir" | sed 's:/*$::')
+
 
     # Create the top-level directory for the node
     mkdir -p "$target_node_top_level_dir"
@@ -183,7 +190,8 @@ download_node() {
     fi
 
     log_info "Starting recursive download for node $node_name into $target_node_top_level_dir"
-    # Initial call: current_server_relative_path is empty, current_local_node_base_path is the top-level dir
+    # Initial call: current_server_relative_path is empty,
+    # current_local_node_base_path is the top-level dir (without trailing slash)
     if ! _recursive_download_node_contents "$node_name" "" "$target_node_top_level_dir"; then
         script_log "ERROR: Recursive download failed for node $node_name. Check previous logs for details."
         # Consider cleaning up: rm -rf "$target_node_top_level_dir"
