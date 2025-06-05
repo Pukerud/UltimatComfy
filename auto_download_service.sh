@@ -17,12 +17,38 @@ if [ -f "$DOCKER_SETUP_SCRIPT" ]; then
     # shellcheck source=docker_setup.sh
     source "$DOCKER_SETUP_SCRIPT"
 else
-    script_log "Error: docker_setup.sh not found."
+    # If common_utils.sh sourced, script_log might be available.
+    # Otherwise, echo to stderr.
+    if command -v script_log &> /dev/null; then
+        script_log "Error: docker_setup.sh not found."
+    else
+        echo "Error: docker_setup.sh not found." >&2
+    fi
     exit 1
 fi
 
-# Initialize Docker paths
+# Initialize Docker paths (needed for logging and other functions)
 initialize_docker_paths
+
+# --- Lock File Configuration ---
+LOCK_FILE_PATH="/tmp/auto_download_service.sbas.lock"
+
+# Attempt to acquire lock
+if mkdir "$LOCK_FILE_PATH"; then
+    # log_info should be available now since common_utils and docker_setup are sourced, and paths initialized.
+    log_info "Lock acquired: $LOCK_FILE_PATH. Auto download service (PID: $$) starting."
+    # Setup trap to remove lock on exit
+    trap 'rmdir "$LOCK_FILE_PATH"; log_info "Lock file $LOCK_FILE_PATH removed. Auto download service instance ($(basename $0) PID: $$) stopped."; exit' INT TERM EXIT HUP
+else
+    # Using script_log for consistency if available, otherwise echo to stderr.
+    # The error message should go to stderr.
+    if command -v script_log &> /dev/null; then
+        script_log "ERROR: Another instance of auto_download_service.sh is already running (lock file $LOCK_FILE_PATH exists). Exiting."
+    else
+        echo "ERROR: Another instance of auto_download_service.sh is already running (lock file $LOCK_FILE_PATH exists). Exiting." >&2
+    fi
+    exit 1
+fi
 
 # Server configuration
 SERVER_BASE_URL="http://192.168.1.29:8081/"
@@ -518,7 +544,7 @@ download_model() {
             return 1
         else
             local file_size
-            file_size=$(stat -c%s "$local_item_path")
+            file_size=$(stat -c%s "$file_local_path")
             log_info "VERIFIED: Single model file $local_item_path exists, is not empty, and has size $file_size bytes after download for $decoded_item_name."
         fi
         log_info "Successfully downloaded model file: $decoded_item_name"
@@ -644,5 +670,5 @@ main() {
     done
 }
 
-# Run the main function
+# Run the main function - This will only be reached if the lock was acquired.
 main
