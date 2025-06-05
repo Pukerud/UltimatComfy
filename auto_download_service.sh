@@ -231,40 +231,139 @@ install_node_dependencies() {
         return 0 # Success, as there's nothing to do
     fi
 
-    log_info "requirements.txt found at $host_requirements_file. Attempting to install dependencies in ComfyUI container."
+    log_info "requirements.txt found at $host_requirements_file. Attempting to install dependencies in all ComfyUI containers."
 
-    local container_name
-    container_name=$(docker ps --filter "name=comfyui-gpu" --format "{{.Names}}" | head -n 1)
+    mapfile -t container_names < <(docker ps --filter "name=comfyui-gpu" --format "{{.Names}}")
 
-    if [ -z "$container_name" ]; then
-        script_log "ERROR: No running ComfyUI container (comfyui-gpu*) found. Cannot install dependencies for $node_path."
-        return 1
+    if [ ${#container_names[@]} -eq 0 ]; then
+        log_info "No ComfyUI containers (comfyui-gpu*) found running. Skipping installation for $node_path."
+        return 0 # Not an error for this function if no containers are present
     fi
-    log_info "Found ComfyUI container: $container_name"
 
     local repo_name
     repo_name=$(basename "$node_path")
     if [ -z "$repo_name" ] || [ "$repo_name" == "." ]; then
         script_log "ERROR: Could not determine repository name from node path: $node_path"
-        return 1
+        return 1 # This is an error with the input or environment
     fi
 
-    # DOCKER_DATA_ACTUAL_PATH/custom_nodes/MyNode/requirements.txt -> /app/ComfyUI/custom_nodes/MyNode/requirements.txt
     local container_req_path="/app/ComfyUI/custom_nodes/$repo_name/requirements.txt"
-    log_info "Host requirements file: $host_requirements_file"
-    log_info "Target container requirements file path: $container_req_path for repo $repo_name in container $container_name"
+    log_info "Target container requirements file path: $container_req_path for repo $repo_name."
+    log_info "Attempting to install dependencies into containers: ${container_names[*]}"
 
-    log_info "Executing pip install in container $container_name for $container_req_path..."
-    docker exec "$container_name" python3 -m pip install -r "$container_req_path"
-    local pip_exit_code=$?
+    local overall_success=0 # 0 for overall success, 1 for any failure
 
-    if [ $pip_exit_code -eq 0 ]; then
-        log_info "Successfully installed dependencies from $container_req_path in container $container_name."
+    for container_name in "${container_names[@]}"; do
+        log_info "Installing dependencies from $container_req_path for node $repo_name into container: $container_name"
+
+        # Check if the requirements file exists inside the container.
+        # This is an important check because the node might have been cloned to the host,
+        # but the container might not have been restarted yet to pick up the new custom node files.
+        # If start_comfyui.sh mounts custom_nodes from the host, this check might be redundant
+        # if we assume the file system is immediately consistent. However, it's safer to check.
+        # For now, we'll proceed with the pip install directly as per the original logic flow,
+        # assuming the file will be there if the node was correctly added/updated.
+        # A more robust check could be:
+        # if ! docker exec "$container_name" test -f "$container_req_path"; then
+        #     script_log "WARN: Requirements file $container_req_path not found in container $container_name. Skipping for this container."
+        #     continue # Or overall_success=1 depending on strictness
+        # fi
+
+        docker exec "$container_name" python3 -m pip install -r "$container_req_path"
+        local pip_exit_code=$?
+
+        if [ $pip_exit_code -eq 0 ]; then
+            log_info "Successfully installed dependencies from $container_req_path in container $container_name for $repo_name."
+        else
+            script_log "ERROR: 'docker exec $container_name python3 -m pip install -r $container_req_path' failed with exit code $pip_exit_code for $repo_name."
+            overall_success=1 # Mark failure
+        fi
+    done
+
+    if [ $overall_success -eq 0 ]; then
+        log_info "Successfully installed dependencies for $repo_name in all targeted containers (if any were running)."
     else
-        script_log "ERROR: 'docker exec $container_name python3 -m pip install -r $container_req_path' failed with exit code $pip_exit_code."
+        script_log "ERROR: Failed to install dependencies for $repo_name in one or more containers."
     fi
 
-    return $pip_exit_code
+    return $overall_success
+}
+
+install_all_dependencies_in_all_running_containers() {
+    log_info "Starting full dependency scan and installation for all nodes in all running ComfyUI containers..."
+    mapfile -t container_names < <(docker ps --filter "name=comfyui-gpu" --format "{{.Names}}")
+
+    if [ ${#container_names[@]} -eq 0 ]; then
+        log_info "No ComfyUI containers (comfyui-gpu*) found running. Skipping full dependency installation."
+        return 0
+    fi
+    log_info "Found running ComfyUI containers: ${container_names[*]}"
+
+    local host_custom_nodes_base_dir="$DOCKER_DATA_ACTUAL_PATH/custom_nodes"
+    if [ ! -d "$host_custom_nodes_base_dir" ]; then
+        log_info "Custom nodes directory $host_custom_nodes_base_dir does not exist. Nothing to install."
+        return 0
+    fi
+
+    local overall_install_status=0 # 0 for success, 1 for failure
+
+    # Ensure we glob for directories. The trailing / is important.
+    # Also, handle the case where no subdirectories are found by shopt -s nullglob
+    # and revert it after to avoid affecting other parts of the script.
+    local previous_nullglob_setting
+    previous_nullglob_setting=$(shopt -p nullglob) # Save current setting
+    shopt -s nullglob # Enable nullglob to make the loop not run if no matches
+
+    for host_node_dir in "$host_custom_nodes_base_dir"/*/; do
+        # The nullglob handles the case where no directories are found.
+        # The loop itself will not run if "$host_custom_nodes_base_dir"/*/ expands to nothing.
+        # We still check if it's a directory, though glob /*/ should only return directories.
+        if [ ! -d "$host_node_dir" ]; then
+            # This should ideally not be reached if nullglob works and globbing is correct.
+            log_warn "Item $host_node_dir is not a directory. Skipping."
+            continue
+        fi
+
+        local host_req_file="${host_node_dir}requirements.txt"
+        if [ -f "$host_req_file" ]; then
+            local repo_name
+            repo_name=$(basename "$host_node_dir") # basename correctly handles trailing slash
+            local container_req_path_for_node="/app/ComfyUI/custom_nodes/$repo_name/requirements.txt"
+            log_info "Found requirements.txt for node $repo_name (host: $host_req_file). Processing for all containers."
+
+            for container_name in "${container_names[@]}"; do
+                log_info "Attempting to install dependencies for $repo_name from $container_req_path_for_node into container $container_name..."
+                # Before executing, one might add a check if $container_req_path_for_node exists in the container:
+                # if ! docker exec "$container_name" test -f "$container_req_path_for_node"; then
+                #     script_log "WARN: Node $repo_name's requirements $container_req_path_for_node not found in container $container_name. May need restart or volume mount check."
+                #     # overall_install_status=1 # Or just skip this one
+                #     continue
+                # fi
+                docker exec "$container_name" python3 -m pip install -r "$container_req_path_for_node"
+                local pip_exec_code=$?
+                if [ $pip_exec_code -eq 0 ]; then
+                    log_info "Successfully installed dependencies for $repo_name in $container_name."
+                else
+                    script_log "ERROR: Failed to install dependencies for $repo_name in $container_name (requirements: $container_req_path_for_node). Exit code: $pip_exec_code"
+                    overall_install_status=1
+                fi
+            done
+        else
+            # log_info "No requirements.txt found for node $(basename "$host_node_dir") at $host_req_file."
+            : # Do nothing, this is common
+        fi
+    done
+
+    eval "$previous_nullglob_setting" # Restore previous nullglob setting
+
+    if [ $overall_install_status -eq 0 ]; then
+        log_info "Full dependency installation scan completed successfully for all nodes and containers."
+    else
+        # log_error is not defined in common_utils.sh, using script_log with ERROR prefix
+        script_log "ERROR: One or more dependency installations failed during the full scan."
+    fi
+
+    return $overall_install_status
 }
 
 check_for_new_models() {
@@ -483,23 +582,45 @@ restart_comfyui_containers() {
     fi
 
     log_info "Starting ComfyUI containers using $start_script_path..."
-    "$start_script_path"
-    local start_exit_code=$?
-    if [ $start_exit_code -ne 0 ]; then
-        script_log "ERROR: Failed to start ComfyUI containers. Exit code: $start_exit_code."
-        return 1
+    if "$start_script_path"; then
+        log_info "ComfyUI containers started successfully by $start_script_path."
+
+        # After successful start, ensure all dependencies are installed in the new containers.
+        log_info "Ensuring all dependencies are installed in the new/restarted containers..."
+        if install_all_dependencies_in_all_running_containers; then
+            log_info "Successfully ensured all dependencies are present in new/restarted containers."
+        else
+            # Use script_log for errors as log_error is not defined in common_utils.sh
+            script_log "ERROR: Failed to install all dependencies in new/restarted containers. ComfyUI might not operate correctly with all custom nodes."
+            # Depending on policy, this could return 1.
+            # For now, the restart itself is considered "successful" if containers are up,
+            # but we've logged a significant issue. The service will continue its loop.
+        fi
     else
-        log_info "ComfyUI containers started successfully."
+        local start_exit_code=$? # Capture exit code immediately
+        script_log "ERROR: Failed to start ComfyUI containers using $start_script_path. Exit code: $start_exit_code."
+        return 1 # Start script failed, so the overall restart failed.
     fi
 
-    # If stop failed but start succeeded, we consider it a success overall for the restart operation's attempt.
-    # The primary goal is to get the containers running with the new changes.
+    # If stop failed but start succeeded (and subsequent dependency install logged its own errors),
+    # we consider it a success overall for the restart operation's attempt to get containers running.
     return 0
 }
 
 # Main loop
 main() {
     log_info "Auto download service started."
+
+    # Initial attempt to install all dependencies for existing nodes/containers
+    log_info "Performing initial check and installation of all dependencies for all custom nodes..."
+    if install_all_dependencies_in_all_running_containers; then
+        log_info "Initial dependency installation check completed successfully."
+    else
+        # Using script_log for error as log_error is not defined in common_utils.sh
+        script_log "ERROR: One or more errors occurred during initial dependency installation check. Please check logs."
+        # This is not a fatal error for the service to start, so we continue.
+    fi
+
     while true; do
         NEEDS_RESTART=false
         log_info "-------------------- New Check Cycle --------------------"
