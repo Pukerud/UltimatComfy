@@ -26,198 +26,198 @@ initialize_docker_paths
 
 # Server configuration
 SERVER_BASE_URL="http://192.168.1.29:8081/"
-AUTO_NODES_PATH="Auto/Nodes/"
+AUTO_NODES_PATH="Auto/Nodes/" # Used for Custom.txt, actual nodes are cloned from git repos
 AUTO_MODELS_PATH="Auto/Models/"
 
 NEEDS_RESTART=false
+PROCESSED_CUSTOM_TXT_PATH="" # Will be initialized in main or after DOCKER_DATA_ACTUAL_PATH is set
 
 # Functions
-check_for_new_nodes() {
-    log_info "Checking for new nodes on the server..."
 
-    local server_nodes_raw
-    server_nodes_raw=$(curl -sL "$SERVER_BASE_URL$AUTO_NODES_PATH" | grep -o '<a href="[^"]*"' | sed 's/<a href="//;s/"//' | grep '/$' | sed 's|/||')
-    if [ $? -ne 0 ] || [ -z "$server_nodes_raw" ]; then
-        log_info "Failed to retrieve node list from server or no nodes found."
-        return
+process_git_clone_command() {
+    local clone_command_line="$1"
+    log_info "Processing git clone command: $clone_command_line"
+
+    if ! echo "$clone_command_line" | grep -qE '^git clone'; then
+        script_log "ERROR: Invalid command. Not a 'git clone' command: $clone_command_line"
+        return 1
     fi
 
-    mapfile -t server_nodes < <(echo "$server_nodes_raw")
+    # Extract URL - This handles `git clone <URL>` or `git clone --depth 1 <URL>` etc.
+    # It takes the last argument as URL, or second to last if last is a target dir.
+    # This is a simplified parser. A more robust solution might require more complex parsing if various git clone formats are used.
+    local words=($clone_command_line)
+    local git_url=""
+    local target_dir_specified=false
 
-    local local_custom_nodes_path="$DOCKER_DATA_ACTUAL_PATH/custom_nodes/"
-    if [ ! -d "$local_custom_nodes_path" ]; then
-        log_info "Local custom_nodes directory does not exist. Creating: $local_custom_nodes_path"
-        mkdir -p "$local_custom_nodes_path"
+    # Check if the second to last argument is a URL (common for `git clone <url> <dir>`)
+    # or if the last argument is a URL (common for `git clone <url>`)
+    # A simple heuristic: if the last word doesn't look like an option (doesn't start with -)
+    # and the second to last word looks like a URL, it might be `clone url dir`.
+    # Otherwise, assume last word is URL if it doesn't start with -.
+
+    # For now, let's assume the URL is the second argument if only two args, or third if more (e.g. git clone --depth 1 <URL>)
+    # A very basic approach: find the first argument that looks like a URL.
+    for word in "${words[@]}"; do
+        if [[ "$word" == http* ]] || [[ "$word" == git@* ]]; then
+            git_url="$word"
+            break
+        fi
+    done
+
+    if [ -z "$git_url" ]; then
+        script_log "ERROR: Could not reliably extract Git URL from command: $clone_command_line"
+        return 1
+    fi
+    log_info "Extracted Git URL: $git_url"
+
+    local repo_name
+    repo_name=$(basename "$git_url" .git)
+    repo_name=$(basename "$repo_name") # Handles if .git was not present, or to get final component
+
+    if [ -z "$repo_name" ] || [ "$repo_name" == "." ]; then
+        script_log "ERROR: Could not determine repository name from URL: $git_url"
+        return 1
+    fi
+    log_info "Determined repository name: $repo_name"
+
+    local target_custom_nodes_base_dir="$DOCKER_DATA_ACTUAL_PATH/custom_nodes"
+    # Ensure base custom_nodes dir exists
+    mkdir -p "$target_custom_nodes_base_dir"
+    if [ $? -ne 0 ]; then
+        script_log "ERROR: Failed to create base custom_nodes directory: $target_custom_nodes_base_dir"
+        return 1
+    fi
+
+    local cloned_repo_path="$target_custom_nodes_base_dir/$repo_name"
+    cloned_repo_path=$(echo "$cloned_repo_path" | tr -s '/') # Normalize path
+
+    if [ -d "$cloned_repo_path" ]; then
+        log_info "Repository $repo_name already exists at $cloned_repo_path. Skipping clone."
+        # We still run install_node_dependencies in case requirements changed or failed previously
+        if install_node_dependencies "$cloned_repo_path"; then
+            return 0 # Success, as it's "processed"
+        else
+            script_log "ERROR: Dependency installation failed for existing repo $repo_name. It will be retried."
+            return 1 # Failed, so it's not marked as "processed" in Custom.txt.processed
+        fi
+    fi
+
+    log_info "Cloning $git_url into $cloned_repo_path"
+    # We clone into a temporary path first, then move on success. This avoids partial clones in the final location.
+    local temp_clone_path
+    temp_clone_path=$(mktemp -d -p "$target_custom_nodes_base_dir" "${repo_name}.tmp.XXXXXX")
+
+    # Construct the specific git clone command. For now, just basic clone.
+    # If clone_command_line contains options, they are not used here yet.
+    # This part needs to be more robust if complex git clone commands are in Custom.txt
+    git clone "$git_url" "$temp_clone_path"
+    local clone_exit_code=$?
+
+    if [ $clone_exit_code -ne 0 ]; then
+        script_log "ERROR: 'git clone $git_url' failed with exit code $clone_exit_code."
+        rm -rf "$temp_clone_path" # Clean up temp clone
+        return 1
+    fi
+
+    # Move temp clone to final destination
+    mv "$temp_clone_path" "$cloned_repo_path"
+    if [ $? -ne 0 ]; then
+        script_log "ERROR: Failed to move temporary clone from $temp_clone_path to $cloned_repo_path."
+        rm -rf "$temp_clone_path" # Clean up temp clone just in case
+        # cloned_repo_path might be partially there if mv failed midway, consider cleaning it too
+        rm -rf "$cloned_repo_path"
+        return 1
+    fi
+
+    log_info "Successfully cloned $repo_name to $cloned_repo_path."
+
+    if install_node_dependencies "$cloned_repo_path"; then
+        log_info "Dependencies installed successfully for $repo_name."
+        return 0 # Full success
+    else
+        script_log "ERROR: Dependency installation failed for $repo_name."
+        # Keep the cloned repo, but return failure so it's retried (deps might be fixed later)
+        return 1
+    fi
+}
+
+
+check_for_new_nodes() {
+    log_info "Checking for new custom nodes via Custom.txt..."
+    if [ -z "$PROCESSED_CUSTOM_TXT_PATH" ]; then # Ensure PROCESSED_CUSTOM_TXT_PATH is initialized
+        if [ -n "$DOCKER_DATA_ACTUAL_PATH" ]; then
+            PROCESSED_CUSTOM_TXT_PATH="$DOCKER_DATA_ACTUAL_PATH/Custom.txt.processed"
+        else
+            # Fallback if DOCKER_DATA_ACTUAL_PATH is somehow not set yet. This should not happen.
+            local fallback_path="$SCRIPT_DIR/Custom.txt.processed" # SCRIPT_DIR is dir of auto_download_service.sh
+            log_warn "DOCKER_DATA_ACTUAL_PATH not set! Using fallback for PROCESSED_CUSTOM_TXT_PATH: $fallback_path"
+            PROCESSED_CUSTOM_TXT_PATH="$fallback_path"
+        fi
+    fi
+
+    local server_custom_txt_url="$SERVER_BASE_URL$AUTO_NODES_PATH/Custom.txt"
+    local downloaded_custom_txt
+    downloaded_custom_txt=$(mktemp)
+
+    log_info "Downloading Custom.txt from $server_custom_txt_url"
+    wget -nv -O "$downloaded_custom_txt" "$server_custom_txt_url"
+    local wget_exit_code=$?
+
+    if [ $wget_exit_code -ne 0 ]; then
+        script_log "ERROR: Failed to download Custom.txt from $server_custom_txt_url. Exit code: $wget_exit_code"
+        rm -f "$downloaded_custom_txt"
+        return
+    fi
+    log_info "Custom.txt downloaded successfully to $downloaded_custom_txt."
+
+    if [ ! -f "$PROCESSED_CUSTOM_TXT_PATH" ]; then
+        log_info "Processed Custom.txt file not found at $PROCESSED_CUSTOM_TXT_PATH. Creating it."
+        touch "$PROCESSED_CUSTOM_TXT_PATH"
         if [ $? -ne 0 ]; then
-            script_log "ERROR: Failed to create local custom_nodes directory: $local_custom_nodes_path"
+            script_log "ERROR: Failed to create $PROCESSED_CUSTOM_TXT_PATH. Cannot proceed with node checks."
+            rm -f "$downloaded_custom_txt"
             return
         fi
     fi
 
-    local local_nodes_raw
-    local_nodes_raw=$(ls "$local_custom_nodes_path")
-    mapfile -t local_nodes < <(echo "$local_nodes_raw")
+    local new_commands_processed_this_cycle=false
+    mapfile -t current_lines < "$downloaded_custom_txt"
 
-    for node_name in "${server_nodes[@]}"; do
-        if [[ ! " ${local_nodes[*]} " =~ " ${node_name} " ]]; then
-            log_info "New node '$node_name' found on server."
-            if download_node "$node_name"; then
-                NEEDS_RESTART=true
-            fi
+    for line in "${current_lines[@]}"; do
+        local trimmed_line
+        trimmed_line=$(echo "$line" | awk '{$1=$1};1') # Trim leading/trailing whitespace, handles multiple spaces
+
+        if [ -z "$trimmed_line" ] || [[ "$trimmed_line" == \#* ]]; then # Skip empty lines or comments
+            continue
         fi
-    done
-    log_info "Finished checking for new nodes."
-}
 
-_recursive_download_node_contents() {
-    local node_name="$1"                         # e.g., "ComfyUI-Crystools"
-    local current_server_relative_path="$2"      # e.g., "" or "js/" or "subfolder/js/" (must end with / if not empty for directories)
-    local current_local_node_base_path="$3"      # e.g., ".../custom_nodes/ComfyUI-Crystools" or ".../custom_nodes/ComfyUI-Crystools/js"
-
-    local full_server_url="$SERVER_BASE_URL$AUTO_NODES_PATH$node_name/$current_server_relative_path"
-    # Ensure trailing slash for directory URLs if current_server_relative_path is not empty and doesn't have one
-    if [ -n "$current_server_relative_path" ] && [[ "$full_server_url" != */ ]]; then
-        full_server_url+="/"
-    elif [ -z "$current_server_relative_path" ] && [[ "$full_server_url" != */ ]]; then # Top level node_name might not have slash
-         full_server_url+="/"
-    fi
-
-    log_info "Recursively processing server path: $full_server_url into local path: $current_local_node_base_path"
-
-    local server_items_raw
-    server_items_raw=$(curl -sL "$full_server_url" | grep -o '<a href="[^"]*"' | sed 's/<a href="//;s/"//' | grep -v '^\.\./$' | grep -v '^Parent directory$' | grep -E -v '^\?C=[A-Z];O=[A-Z]$')
-
-    if [ $? -ne 0 ]; then
-        script_log "ERROR: curl failed to list items from $full_server_url"
-        return 1 # curl error
-    fi
-
-    if [ -z "$server_items_raw" ]; then
-        log_info "No items (files or subdirectories) found in $full_server_url. Assuming empty directory or end of recursion branch."
-        return 0 # Successfully processed an empty directory
-    fi
-
-    mapfile -t server_items < <(echo "$server_items_raw")
-
-    for item_on_server in "${server_items[@]}"; do
-        local decoded_item_name
-        decoded_item_name=$(printf '%b' "${item_on_server//%/\\x}") # URL decode
-
-        if [[ "$item_on_server" == */ ]]; then # It's a directory (original name from server ends with /)
-            log_info "Found directory: $decoded_item_name within $node_name/$current_server_relative_path"
-            local raw_local_subdir_path="$current_local_node_base_path/$decoded_item_name"
-            local local_subdir_path
-            local_subdir_path=$(echo "$raw_local_subdir_path" | tr -s '/')
-
-            mkdir -p "$local_subdir_path" # mkdir -p handles trailing slash correctly
-            if [ $? -ne 0 ]; then
-                script_log "ERROR: Failed to create local directory $local_subdir_path (raw: $raw_local_subdir_path)"
-                return 1
-            fi
-
-            # Recursive call:
-            # - current_server_relative_path appends the new directory (item_on_server, which includes its trailing /)
-            # - current_local_node_base_path is the newly created normalized local_subdir_path
-            if ! _recursive_download_node_contents "$node_name" "$current_server_relative_path$item_on_server" "$local_subdir_path"; then
-                script_log "ERROR: Recursive download failed for subdirectory $decoded_item_name of node $node_name."
-                return 1 # Propagate failure
-            fi
-        else # It's a file
-            log_info "Found file: $decoded_item_name within $node_name/$current_server_relative_path"
-            local raw_file_local_target_path="$current_local_node_base_path/$decoded_item_name"
-            local file_local_target_path
-            file_local_target_path=$(echo "$raw_file_local_target_path" | tr -s '/')
-
-            # Construct file source URL carefully: full_server_url already has node_name/current_server_relative_path/
-            # item_on_server is the filename itself from this level.
-            local file_source_url="$full_server_url$item_on_server"
-
-            # Ensure parent directory for the file exists
-            local file_parent_dir
-            file_parent_dir=$(dirname "$file_local_target_path") # Use normalized path to get dirname
-            mkdir -p "$file_parent_dir"
-            if [ $? -ne 0 ]; then
-                 script_log "ERROR: Failed to create parent directory $file_parent_dir (for raw path $raw_file_local_target_path) for file $decoded_item_name"
-                 return 1
-            fi
-
-            log_info "Downloading: $file_source_url to $file_local_target_path (raw: $raw_file_local_target_path)"
-            wget -nv -O "$file_local_target_path" "$file_source_url"
-            local wget_exit_code=$?
-            log_info "wget raw exit code for $decoded_item_name ($file_source_url): $wget_exit_code"
-            if [ $wget_exit_code -ne 0 ]; then
-                script_log "ERROR: wget download failed for $decoded_item_name from $file_source_url with exit code $wget_exit_code."
-                script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_target_path"):"
-                ls -lA "$(dirname "$file_local_target_path")" # Output goes to main service log via nohup
-                return 1
-            fi
-            # Stricter verification: file must exist and be non-empty
-            if [ ! -f "$file_local_target_path" ]; then
-                script_log "CRITICAL_ERROR: File $file_local_target_path (raw: $raw_file_local_target_path) NOT FOUND immediately after wget reported success (exit code 0) for $decoded_item_name."
-                script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_target_path"):"
-                ls -lA "$(dirname "$file_local_target_path")"
-                return 1
-            elif [ ! -s "$file_local_target_path" ]; then
-                script_log "CRITICAL_ERROR: File $file_local_target_path (raw: $raw_file_local_target_path) IS EMPTY immediately after wget reported success (exit code 0) for $decoded_item_name."
-                script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_target_path"):"
-                ls -lA "$(dirname "$file_local_target_path")"
-                # Optionally remove the empty file: rm -f "$file_local_target_path"
-                return 1
+        # Check if command already processed
+        # Using grep -Fxq for exact, fixed string, quiet match.
+        if ! grep -Fxq "$trimmed_line" "$PROCESSED_CUSTOM_TXT_PATH"; then
+            log_info "New command found in Custom.txt: '$trimmed_line'"
+            if [[ "$trimmed_line" == git\ clone* ]]; then
+                if process_git_clone_command "$trimmed_line"; then
+                    log_info "Successfully processed command: '$trimmed_line'. Appending to processed list."
+                    echo "$trimmed_line" >> "$PROCESSED_CUSTOM_TXT_PATH"
+                    NEEDS_RESTART=true
+                    new_commands_processed_this_cycle=true
+                else
+                    script_log "ERROR: Failed to process command: '$trimmed_line'. It will be retried next cycle."
+                fi
             else
-                local file_size
-                file_size=$(stat -c%s "$file_local_target_path")
-                log_info "VERIFIED: File $file_local_target_path (raw: $raw_file_local_target_path) exists, is not empty, and has size $file_size bytes after download for $decoded_item_name."
+                script_log "WARN: Non 'git clone' command found in Custom.txt: '$trimmed_line'. Skipping."
+                # Optionally, add non-clone lines to processed list if they should not be re-evaluated
+                # echo "$trimmed_line" >> "$PROCESSED_CUSTOM_TXT_PATH"
             fi
+        else
+            log_info "Command already processed: '$trimmed_line'"
         fi
     done
-    return 0 # All items in this directory processed successfully
-}
 
-download_node() {
-    local node_name="$1" # This is just the top-level node directory name, e.g. "ComfyUI-Manager"
-    log_info "Attempting to download node: $node_name"
-    # target_node_top_level_dir should not have a trailing slash for consistent processing with tr -s '/' later
-    local target_node_top_level_dir
-    target_node_top_level_dir="$DOCKER_DATA_ACTUAL_PATH/custom_nodes/$node_name"
-    target_node_top_level_dir=$(echo "$target_node_top_level_dir" | sed 's:/*$::')
-
-
-    # Create the top-level directory for the node
-    mkdir -p "$target_node_top_level_dir"
-    if [ $? -ne 0 ]; then
-        script_log "ERROR: Failed to create top-level directory for node $node_name at $target_node_top_level_dir"
-        return 1
-    fi
-    # Verify directory existence immediately after claimed successful creation
-    if [ ! -d "$target_node_top_level_dir" ]; then
-        script_log "CRITICAL_ERROR: Top-level node directory $target_node_top_level_dir was NOT CREATED or is not a directory, even though mkdir -p command reported success."
-        script_log "DEBUG: Listing contents of parent directory $(dirname "$target_node_top_level_dir"):"
-        ls -lA "$(dirname "$target_node_top_level_dir")"
-        return 1
-    else
-        log_info "VERIFIED: Top-level node directory $target_node_top_level_dir exists."
-    fi
-
-    log_info "Starting recursive download for node $node_name into $target_node_top_level_dir"
-    # Initial call: current_server_relative_path is empty,
-    # current_local_node_base_path is the top-level dir (without trailing slash)
-    if ! _recursive_download_node_contents "$node_name" "" "$target_node_top_level_dir"; then
-        script_log "ERROR: Recursive download failed for node $node_name. Check previous logs for details."
-        # Consider cleaning up: rm -rf "$target_node_top_level_dir"
-        return 1 # Download part failed
-    fi
-
-    log_info "Successfully downloaded all contents for node $node_name."
-
-    # Proceed with dependency installation only if download was successful
-    if install_node_dependencies "$target_node_top_level_dir"; then
-        log_info "Dependencies installed (or not needed) for node $node_name."
-        return 0 # Success for both download and dependencies
-    else
-        script_log "ERROR: Failed to install dependencies for node $node_name."
-        # Consider cleaning up: rm -rf "$target_node_top_level_dir"
-        return 1 # Dependencies part failed
-    fi
+    rm -f "$downloaded_custom_txt"
+    log_info "Finished checking for new nodes from Custom.txt."
+    # If new_commands_processed_this_cycle is true, NEEDS_RESTART would have been set.
 }
 
 install_node_dependencies() {
