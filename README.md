@@ -19,6 +19,42 @@ The script aims to streamline the ComfyUI experience, especially for users who p
 -   **User-Friendly Menu:** Interactive menus guide the user through different operations.
 -   **Path Auto-detection & Manual Override:** Attempts to find existing ComfyUI data paths but also allows manual path specification for model downloads.
 
+## Auto-Download Service
+
+The `UltimateComfy.sh` setup now includes an automated background service (`auto_download_service.sh`) designed to keep your ComfyUI assets up-to-date.
+
+**Functionality:**
+-   **Automatic Updates:** The service runs in the background when you start ComfyUI using the generated `start_comfyui.sh` script. It polls a pre-configured server every 10 seconds.
+-   **Custom Nodes:**
+    -   Checks for new custom nodes on the server (expected under an `Auto/Nodes/` directory on the server).
+    -   Downloads new nodes to your local `$BASE_DOCKER_SETUP_DIR/comfyui_data/custom_nodes/` directory, preserving any subdirectory structure from the server.
+    -   Installs Python dependencies by running `pip install -r requirements.txt` if a `requirements.txt` file is found within the downloaded node's directory.
+    -   Automatically triggers a restart of the ComfyUI Docker containers if a new node and its dependencies (if any) are successfully downloaded and installed.
+-   **Models:**
+    -   Checks for new models on the server (expected under an `Auto/Models/` directory on the server).
+    -   Downloads new models (individual files or files within one level of subdirectories) to your local `$BASE_DOCKER_SETUP_DIR/comfyui_data/models/` directory, preserving structure.
+    -   Downloading new models does **not** trigger a restart of ComfyUI.
+
+**Monitoring the Service:**
+-   **Log File:** The service logs its activities to `$BASE_DOCKER_SETUP_DIR/auto_download_service.log`. If the `BASE_DOCKER_SETUP_DIR` variable is not set when the service starts (which is unlikely when launched via `start_comfyui.sh`), logs will fallback to `/tmp/auto_download_service.log`.
+-   **Process ID (PID):** When active, the service's PID is stored in `$BASE_DOCKER_SETUP_DIR/scripts/auto_download_service.pid`.
+-   **Checking Status:** You can check if the service is running using commands like:
+    ```bash
+    ps aux | grep auto_download_service.sh
+    ```
+    Or by checking the contents of the PID file:
+    ```bash
+    cat $HOME/comfyui_unified_setup/scripts/auto_download_service.pid
+    ```
+    (Adjust `$HOME/comfyui_unified_setup` if your `BASE_DOCKER_SETUP_DIR` is different).
+
+**Lifecycle:**
+-   The auto-download service is automatically started when you run `start_comfyui.sh`.
+-   It is automatically stopped when you run `stop_comfyui.sh`.
+
+**Server Configuration:**
+-   The service expects new nodes and models to be available on the server configured within the scripts (default: `http://192.168.1.29:8081/`) under the paths `Auto/Nodes/` and `Auto/Models/` respectively.
+
 ## `--network host` Modification
 
 The `docker run` command used to start the ComfyUI containers has been modified to include the `--network host` option.
