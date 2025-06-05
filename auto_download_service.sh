@@ -188,6 +188,15 @@ download_node() {
         script_log "ERROR: Failed to create top-level directory for node $node_name at $target_node_top_level_dir"
         return 1
     fi
+    # Verify directory existence immediately after claimed successful creation
+    if [ ! -d "$target_node_top_level_dir" ]; then
+        script_log "CRITICAL_ERROR: Top-level node directory $target_node_top_level_dir was NOT CREATED or is not a directory, even though mkdir -p command reported success."
+        script_log "DEBUG: Listing contents of parent directory $(dirname "$target_node_top_level_dir"):"
+        ls -lA "$(dirname "$target_node_top_level_dir")"
+        return 1
+    else
+        log_info "VERIFIED: Top-level node directory $target_node_top_level_dir exists."
+    fi
 
     log_info "Starting recursive download for node $node_name into $target_node_top_level_dir"
     # Initial call: current_server_relative_path is empty,
