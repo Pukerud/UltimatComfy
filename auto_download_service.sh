@@ -221,43 +221,47 @@ check_for_new_nodes() {
 }
 
 install_node_dependencies() {
-    local node_path="$1"
+    local node_path="$1" # This is the host path, e.g., /data/ComfyUI/custom_nodes/MyNode
     log_info "Checking for dependencies in: $node_path"
 
-    local requirements_file="$node_path/requirements.txt"
+    local host_requirements_file="$node_path/requirements.txt"
 
-    if [ ! -f "$requirements_file" ]; then
+    if [ ! -f "$host_requirements_file" ]; then
         log_info "No requirements.txt found in $node_path. No dependencies to install for this node."
         return 0 # Success, as there's nothing to do
     fi
 
-    log_info "requirements.txt found in $node_path. Attempting to install dependencies."
+    log_info "requirements.txt found at $host_requirements_file. Attempting to install dependencies in ComfyUI container."
 
-    local current_dir
-    current_dir=$(pwd)
+    local container_name
+    container_name=$(docker ps --filter "name=comfyui-gpu" --format "{{.Names}}" | head -n 1)
 
-    if ! cd "$node_path"; then
-        script_log "ERROR: Failed to change directory to $node_path."
-        # Attempt to cd back to original directory, though $current_dir might not be set if pwd failed.
-        # However, pwd failing is highly unlikely.
-        cd "$current_dir"
-        return 1 # Failure
+    if [ -z "$container_name" ]; then
+        script_log "ERROR: No running ComfyUI container (comfyui-gpu*) found. Cannot install dependencies for $node_path."
+        return 1
+    fi
+    log_info "Found ComfyUI container: $container_name"
+
+    local repo_name
+    repo_name=$(basename "$node_path")
+    if [ -z "$repo_name" ] || [ "$repo_name" == "." ]; then
+        script_log "ERROR: Could not determine repository name from node path: $node_path"
+        return 1
     fi
 
-    log_info "Installing dependencies from $requirements_file..."
-    python3 -m pip install -r requirements.txt
+    # DOCKER_DATA_ACTUAL_PATH/custom_nodes/MyNode/requirements.txt -> /app/ComfyUI/custom_nodes/MyNode/requirements.txt
+    local container_req_path="/app/ComfyUI/custom_nodes/$repo_name/requirements.txt"
+    log_info "Host requirements file: $host_requirements_file"
+    log_info "Target container requirements file path: $container_req_path for repo $repo_name in container $container_name"
+
+    log_info "Executing pip install in container $container_name for $container_req_path..."
+    docker exec "$container_name" python3 -m pip install -r "$container_req_path"
     local pip_exit_code=$?
 
     if [ $pip_exit_code -eq 0 ]; then
-        log_info "Successfully installed dependencies from $requirements_file."
+        log_info "Successfully installed dependencies from $container_req_path in container $container_name."
     else
-        script_log "ERROR: pip install -r requirements.txt failed with exit code $pip_exit_code for $node_path."
-    fi
-
-    if ! cd "$current_dir"; then
-        script_log "ERROR: Failed to change directory back to $current_dir from $node_path. This is unexpected."
-        # This is a more serious issue, might indicate a problem with $current_dir or filesystem state
-        # For now, still return based on pip_exit_code, but this warrants attention if it occurs.
+        script_log "ERROR: 'docker exec $container_name python3 -m pip install -r $container_req_path' failed with exit code $pip_exit_code."
     fi
 
     return $pip_exit_code
@@ -427,30 +431,55 @@ restart_comfyui_containers() {
     log_info "Beginning ComfyUI container restart process..."
 
     if [ -z "$DOCKER_SCRIPTS_ACTUAL_PATH" ]; then
-        script_log "ERROR: DOCKER_SCRIPTS_ACTUAL_PATH is not set. Cannot restart containers."
+        script_log "ERROR: DOCKER_SCRIPTS_ACTUAL_PATH is not set. Cannot locate start_comfyui.sh."
         return 1
     fi
 
-    local stop_script_path="$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"
     local start_script_path="$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-
-    if [ ! -x "$stop_script_path" ]; then
-        script_log "ERROR: Stop script not found or not executable at $stop_script_path"
-        return 1
-    fi
 
     if [ ! -x "$start_script_path" ]; then
         script_log "ERROR: Start script not found or not executable at $start_script_path"
         return 1
     fi
 
-    log_info "Stopping ComfyUI containers using $stop_script_path..."
-    "$stop_script_path"
-    local stop_exit_code=$?
-    if [ $stop_exit_code -ne 0 ]; then
-        script_log "ERROR: Failed to stop ComfyUI containers. Exit code: $stop_exit_code. Proceeding to attempt start..."
+    log_info "Stopping and removing ComfyUI containers (comfyui-gpu*)..."
+    local comfyui_containers
+    comfyui_containers=$(docker ps -a --filter "name=comfyui-gpu" --format "{{.Names}}")
+
+    local overall_stop_success=true
+    if [ -z "$comfyui_containers" ]; then
+        log_info "No running or stopped ComfyUI containers (comfyui-gpu*) found to stop/remove."
     else
-        log_info "ComfyUI containers stopped successfully."
+        for container_name in $comfyui_containers; do
+            log_info "Stopping container: $container_name"
+            docker stop "$container_name"
+            local stop_code=$?
+            if [ $stop_code -ne 0 ]; then
+                script_log "WARN: Failed to stop container $container_name. Exit code: $stop_code. Attempting removal anyway."
+                overall_stop_success=false
+            else
+                log_info "Container $container_name stopped successfully."
+            fi
+
+            log_info "Removing container: $container_name"
+            docker rm "$container_name"
+            local rm_code=$?
+            if [ $rm_code -ne 0 ]; then
+                script_log "ERROR: Failed to remove container $container_name. Exit code: $rm_code."
+                overall_stop_success=false # Mark as failure if rm fails
+            else
+                log_info "Container $container_name removed successfully."
+            fi
+        done
+    fi
+
+    if ! $overall_stop_success; then
+        script_log "ERROR: One or more ComfyUI containers could not be properly stopped/removed. Proceeding to attempt start..."
+        # Depending on desired behavior, one might choose to return 1 here.
+        # However, if start_comfyui.sh can handle existing (though possibly problematic) states,
+        # proceeding might be acceptable. For now, we log error and continue.
+    else
+        log_info "All identified ComfyUI containers stopped and removed successfully."
     fi
 
     log_info "Starting ComfyUI containers using $start_script_path..."
