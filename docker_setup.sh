@@ -104,6 +104,12 @@ build_comfyui_image() {
 }
 
 perform_docker_initial_setup() {
+    local project_root_dir="$1"
+    if [ -z "$project_root_dir" ]; then
+        log_error "Project root directory not provided to perform_docker_initial_setup. Cannot locate auto_download_service.sh."
+        return 1
+    fi
+    script_log "DEBUG: project_root_dir in perform_docker_initial_setup is: $project_root_dir"
     script_log "DEBUG: ENTERING perform_docker_initial_setup (docker_setup.sh)"
     set -e
     if ! check_docker_status; then
@@ -208,7 +214,7 @@ perform_docker_initial_setup() {
     echo "set -e" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "# Auto-downloader service management" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-    echo "auto_downloader_script_path=\"\$(cd \"\$(dirname \"\$0\")/..\" && pwd)/auto_download_service.sh\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+    echo "auto_downloader_script_path=\"$project_root_dir/auto_download_service.sh\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "pid_file_path=\"\$(dirname \"\$0\")/auto_download_service.pid\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     # Get BASE_DOCKER_SETUP_DIR from environment, should be exported by common_utils.sh from the parent execution
     echo "base_docker_setup_dir_for_log=\"\$BASE_DOCKER_SETUP_DIR\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"

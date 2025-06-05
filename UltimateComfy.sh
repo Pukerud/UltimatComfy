@@ -85,7 +85,7 @@ Choose an option:" \
         case "$main_choice" in
             "1")
                 # perform_docker_initial_setup is from docker_setup.sh
-                perform_docker_initial_setup
+                perform_docker_initial_setup "$(dirname "$0")"
                 press_enter_to_continue # from common_utils.sh
                 ;;
             "2")
