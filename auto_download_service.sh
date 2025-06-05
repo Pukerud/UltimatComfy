@@ -245,7 +245,7 @@ install_node_dependencies() {
     fi
 
     log_info "Installing dependencies from $requirements_file..."
-    pip install -r requirements.txt
+    python3 -m pip install -r requirements.txt
     local pip_exit_code=$?
 
     if [ $pip_exit_code -eq 0 ]; then

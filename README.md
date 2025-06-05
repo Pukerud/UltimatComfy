@@ -23,6 +23,9 @@ The script aims to streamline the ComfyUI experience, especially for users who p
 
 The `UltimateComfy.sh` setup now includes an automated background service (`auto_download_service.sh`) designed to keep your ComfyUI assets up-to-date.
 
+**Host Prerequisites:**
+-   For the service to automatically install Python dependencies for custom nodes (from `requirements.txt` files), `python3` and `python3-pip` must be installed and available in the PATH on the host system where `auto_download_service.sh` runs. If these are not present, `git clone` operations will still complete, but dependency installation will fail (and be retried on subsequent checks if the node isn't marked as 'processed').
+
 **Functionality:**
 -   **Automatic Updates:** The service runs in the background when you start ComfyUI using the generated `start_comfyui.sh` script. It polls a pre-configured server every 10 seconds.
 -   **Custom Nodes:**
