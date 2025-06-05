@@ -208,7 +208,7 @@ perform_docker_initial_setup() {
     echo "set -e" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "# Auto-downloader service management" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-    echo "auto_downloader_script_path=\"\$(dirname \"\$0\")/../auto_download_service.sh\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+    echo "auto_downloader_script_path=\"\$(cd \"\$(dirname \"\$0\")/..\" && pwd)/auto_download_service.sh\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "pid_file_path=\"\$(dirname \"\$0\")/auto_download_service.pid\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     # Get BASE_DOCKER_SETUP_DIR from environment, should be exported by common_utils.sh from the parent execution
     echo "base_docker_setup_dir_for_log=\"\$BASE_DOCKER_SETUP_DIR\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
