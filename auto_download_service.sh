@@ -148,14 +148,22 @@ _recursive_download_node_contents() {
                 ls -lA "$(dirname "$file_local_target_path")" # Output goes to main service log via nohup
                 return 1
             fi
-            # Verify file existence immediately after claimed successful download
+            # Stricter verification: file must exist and be non-empty
             if [ ! -f "$file_local_target_path" ]; then
                 script_log "CRITICAL_ERROR: File $file_local_target_path NOT FOUND immediately after wget reported success (exit code 0) for $decoded_item_name."
                 script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_target_path"):"
-                ls -lA "$(dirname "$file_local_target_path")" # Output goes to main service log via nohup
-                return 1 # Treat as a failure
+                ls -lA "$(dirname "$file_local_target_path")"
+                return 1
+            elif [ ! -s "$file_local_target_path" ]; then
+                script_log "CRITICAL_ERROR: File $file_local_target_path IS EMPTY immediately after wget reported success (exit code 0) for $decoded_item_name."
+                script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_target_path"):"
+                ls -lA "$(dirname "$file_local_target_path")"
+                # Optionally remove the empty file: rm -f "$file_local_target_path"
+                return 1
             else
-                log_info "VERIFIED: File $file_local_target_path exists after download for $decoded_item_name."
+                local file_size
+                file_size=$(stat -c%s "$file_local_target_path")
+                log_info "VERIFIED: File $file_local_target_path exists, is not empty, and has size $file_size bytes after download for $decoded_item_name."
             fi
         fi
     done
@@ -336,13 +344,21 @@ download_model() {
                     ls -lA "$(dirname "$file_local_path")"
                     return 1
                 fi
+                # Stricter verification for model files in a directory
                 if [ ! -f "$file_local_path" ]; then
                     script_log "CRITICAL_ERROR: Model file $file_local_path NOT FOUND immediately after wget reported success (exit code 0) for $file_in_item_dir_decoded."
                     script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_path"):"
                     ls -lA "$(dirname "$file_local_path")"
                     return 1
+                elif [ ! -s "$file_local_path" ]; then
+                    script_log "CRITICAL_ERROR: Model file $file_local_path IS EMPTY immediately after wget reported success (exit code 0) for $file_in_item_dir_decoded."
+                    script_log "DEBUG: Listing contents of target directory $(dirname "$file_local_path"):"
+                    ls -lA "$(dirname "$file_local_path")"
+                    return 1
                 else
-                    log_info "VERIFIED: Model file $file_local_path exists after download for $file_in_item_dir_decoded."
+                    local file_size
+                    file_size=$(stat -c%s "$file_local_path")
+                    log_info "VERIFIED: Model file $file_local_path exists, is not empty, and has size $file_size bytes after download for $file_in_item_dir_decoded."
                 fi
             done
         else
@@ -369,13 +385,21 @@ download_model() {
             ls -lA "$(dirname "$local_item_path")"
             return 1
         fi
+        # Stricter verification for single model file
         if [ ! -f "$local_item_path" ]; then
             script_log "CRITICAL_ERROR: Single model file $local_item_path NOT FOUND immediately after wget reported success (exit code 0) for $decoded_item_name."
             script_log "DEBUG: Listing contents of target directory $(dirname "$local_item_path"):"
             ls -lA "$(dirname "$local_item_path")"
             return 1
+        elif [ ! -s "$local_item_path" ]; then
+            script_log "CRITICAL_ERROR: Single model file $local_item_path IS EMPTY immediately after wget reported success (exit code 0) for $decoded_item_name."
+            script_log "DEBUG: Listing contents of target directory $(dirname "$local_item_path"):"
+            ls -lA "$(dirname "$local_item_path")"
+            return 1
         else
-            log_info "VERIFIED: Single model file $local_item_path exists after download for $decoded_item_name."
+            local file_size
+            file_size=$(stat -c%s "$local_item_path")
+            log_info "VERIFIED: Single model file $local_item_path exists, is not empty, and has size $file_size bytes after download for $decoded_item_name."
         fi
         log_info "Successfully downloaded model file: $decoded_item_name"
         return 0
