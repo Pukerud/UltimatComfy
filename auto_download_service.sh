@@ -1,4 +1,5 @@
 #!/bin/bash
+chmod u+x "$0"
 
 # Source utility scripts
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
