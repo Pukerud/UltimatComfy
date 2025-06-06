@@ -98,15 +98,19 @@ process_git_clone_command() {
     fi
     log_info "Extracted Git URL: $git_url"
 
-    local repo_name
-    repo_name=$(basename "$git_url" .git)
-    repo_name=$(basename "$repo_name") # Handles if .git was not present, or to get final component
+    local git_url_basename
+    git_url_basename=$(basename "$git_url")
+
+    local derived_repo_name="${git_url_basename%.git}" # Removes .git suffix ONLY if present at the end
+
+    # Now, sanitize this derived_repo_name to remove CR.
+    repo_name=$(echo "$derived_repo_name" | tr -d '\r')
 
     if [ -z "$repo_name" ] || [ "$repo_name" == "." ]; then
-        script_log "ERROR: Could not determine repository name from URL: $git_url"
+        script_log "ERROR: Could not determine repository name from URL: $git_url (derived: $derived_repo_name, basename: $git_url_basename)"
         return 1
     fi
-    log_info "Determined repository name: $repo_name"
+    log_info "Extracted Git URL: $git_url, Determined and sanitized repository name: $repo_name"
 
     local target_custom_nodes_base_dir="$DOCKER_DATA_ACTUAL_PATH/custom_nodes"
     # Ensure base custom_nodes dir exists
@@ -198,7 +202,7 @@ check_for_new_nodes() {
 
     for line in "${current_lines[@]}"; do
         local trimmed_line
-        trimmed_line=$(echo "$line" | awk '{$1=$1};1') # Trim leading/trailing whitespace, handles multiple spaces
+        trimmed_line=$(echo "$line" | tr -d '\r' | awk '{$1=$1};1') # Trim CRLF and leading/trailing whitespace
 
         if [ -z "$trimmed_line" ] || [[ "$trimmed_line" == \#* ]]; then # Skip empty lines or comments
             continue
