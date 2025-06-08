@@ -227,6 +227,7 @@ perform_docker_initial_setup() {
     echo "    else" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "        log_file=\"\${base_docker_setup_dir_for_log}/auto_download_service.log\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "    fi" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+    echo "    mkdir -p \"\$(dirname \"\$log_file\")\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "    nohup \"\$auto_downloader_script_path\" >> \"\$log_file\" 2>&1 & echo \$! > \"\$pid_file_path\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "    echo \"Auto-download service started with PID \$(cat \$pid_file_path). Log: \$log_file\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "else" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
