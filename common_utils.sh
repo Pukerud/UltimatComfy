@@ -9,7 +9,7 @@ BLUE='[0;34m'
 NC='[0m'
 
 # For Docker-oppsett (og generelt brukt)
-BASE_DOCKER_SETUP_DIR="${BASE_DOCKER_SETUP_DIR:-$HOME/comfyui_unified_setup}" # Provide a default if not set
+export BASE_DOCKER_SETUP_DIR="${BASE_DOCKER_SETUP_DIR:-$HOME/comfyui_unified_setup}" # Provide a default if not set
 SCRIPT_LOG_FILE="${SCRIPT_LOG_FILE:-$BASE_DOCKER_SETUP_DIR/ultimate_comfy_debug.log}" # Provide a default
 
 # --- Logging Setup ---
