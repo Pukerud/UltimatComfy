@@ -45,20 +45,21 @@ main_menu() {
 Image: $COMFYUI_IMAGE_NAME
 
 Choose an option:" \
-                20 76 6 \
+                20 76 7 \
                 "1" "Førstegangs oppsett/Installer ComfyUI i Docker" \
                 "2" "Bygg/Oppdater ComfyUI Docker Image" \
                 "3" "Last ned/Administrer Modeller" \
                 "4" "Start ComfyUI Docker Container(e)" \
                 "5" "Stopp ComfyUI Docker Container(e)" \
-                "6" "Avslutt" \
+                "6" "Fix Custom Node Python Dependencies" \
+                "7" "Avslutt" \
                 2>/dev/tty)
 
             local dialog_exit_status=$?
             script_log "DEBUG: dialog command finished. main_choice='$main_choice', dialog_exit_status='$dialog_exit_status'"
             if [ $dialog_exit_status -ne 0 ]; then
-                main_choice="6"
-                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 6."
+                main_choice="7"
+                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 7."
             fi
         else
             script_log "DEBUG: Using basic menu fallback."
@@ -73,9 +74,10 @@ Choose an option:" \
             echo "3) Last ned/Administrer Modeller"
             echo "4) Start ComfyUI Docker Container(e)"
             echo "5) Stopp ComfyUI Docker Container(e)"
-            echo "6) Avslutt"
+            echo "6) Fix Custom Node Python Dependencies"
+            echo "7) Avslutt"
             echo "--------------------------------"
-            echo -n "Velg et alternativ (1-6): " >&2
+            echo -n "Velg et alternativ (1-7): " >&2
             read -r main_choice </dev/tty
             script_log "DEBUG: Basic menu read finished. main_choice='$main_choice'"
         fi
@@ -136,7 +138,19 @@ Choose an option:" \
                 press_enter_to_continue
                 ;;
             "6")
-                script_log "DEBUG: main_menu attempting to exit (Option 6)."
+                script_log "INFO: User selected 'Fix Custom Node Python Dependencies'."
+                local fix_deps_script_path
+                fix_deps_script_path="$(dirname "$0")/fix_custom_node_deps.sh"
+                if [ -x "$fix_deps_script_path" ]; then
+                    if ! check_docker_status; then press_enter_to_continue; continue; fi # from docker_setup.sh
+                    "$fix_deps_script_path"
+                else
+                    log_error "Fix dependencies script not found or not executable at $fix_deps_script_path."
+                fi
+                press_enter_to_continue # from common_utils.sh
+                ;;
+            "7")
+                script_log "DEBUG: main_menu attempting to exit (Option 7)."
                 log_info "Avslutter." # from common_utils.sh
                 clear
                 exit 0
@@ -146,7 +160,7 @@ Choose an option:" \
                     # dialog is from common_utils.sh (via ensure_dialog_installed)
                     dialog --title "Ugyldig valg" --msgbox "Vennligst velg et gyldig alternativ fra menyen." 6 50 2>/dev/tty
                 else
-                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-6." # from common_utils.sh
+                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-7." # from common_utils.sh
                 fi
                 press_enter_to_continue # from common_utils.sh
                 ;;
