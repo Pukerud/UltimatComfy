@@ -263,7 +263,7 @@ perform_docker_initial_setup() {
         echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/whisperx:/cache/whisperx\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "  --network host \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh" # Keep or remove based on user needs
         echo "  --restart unless-stopped \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  \"$COMFYUI_IMAGE_NAME\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "  \"$COMFYUI_IMAGE_NAME\" python3 main.py --max-upload-size 1000 --listen 0.0.0.0 --port \"${host_port}\" --preview-method auto" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "echo \"ComfyUI for GPU $i (Container: $container_name) er tilgjengelig på http://localhost:${host_port}\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     done
     chmod +x "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
