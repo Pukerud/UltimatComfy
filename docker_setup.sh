@@ -15,7 +15,7 @@ COMFYUI_IMAGE_NAME="comfyui-app" # Default, can be overridden by main script if 
 
 # Definer DEVEL image tag-delen her for klarhet
 DOCKER_CUDA_DEVEL_TAG="12.8.1-cudnn-devel-ubuntu22.04"
-# RUNTIME image tag er nå HARDKODET i Dockerfile-genereringen som "12.8.1-cudnn-runtime-ubuntu22.04"
+# RUNTIME image tag er nå DYNAMISK satt fra DOCKER_CUDA_DEVEL_TAG i Dockerfile-genereringen.
 
 # Dynamisk satte stier (will be set by initialize_docker_paths)
 DOCKER_CONFIG_ACTUAL_PATH=""
@@ -75,7 +75,7 @@ build_comfyui_image() {
     script_log "DEBUG FØR BUILD (Original DEVEL): DOCKER_CUDA_DEVEL_TAG er satt til: [$DOCKER_CUDA_DEVEL_TAG]"
     script_log "DEBUG FØR BUILD (Renset DEVEL): clean_devel_tag er satt til: [$clean_devel_tag]"
     log_info "Bruker devel tag (via build-arg): $clean_devel_tag"
-    log_info "Runtime tag er hardkodet i Dockerfile som: 12.8.1-cudnn-runtime-ubuntu22.04"
+    log_info "Runtime tag er dynamisk satt til samme som devel tag i Dockerfile: $DOCKER_CUDA_DEVEL_TAG"
     log_info "Dette kan ta en stund."
 
     local build_arg_devel_str
@@ -184,7 +184,8 @@ perform_docker_initial_setup() {
     printf 'RUN %s\n' 'pip install --no-cache-dir -r requirements.txt'
     printf '\n'
     printf '%s\n' '# Stage 2: Runtime'
-    printf 'FROM nvcr.io/nvidia/cuda:%s AS runtime\n' "12.8.1-cudnn-runtime-ubuntu22.04"
+    # Bruker samme tag som devel for runtime for å sikre kompatibilitet og tilgang til dev-verktøy hvis nødvendig
+    printf 'FROM nvcr.io/nvidia/cuda:%s AS runtime\n' "$DOCKER_CUDA_DEVEL_TAG"
     printf '\n'
     printf 'ENV %s\n' 'DEBIAN_FRONTEND=noninteractive'
     # git added here in runtime stage in previous commit
