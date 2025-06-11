@@ -187,7 +187,12 @@ perform_docker_initial_setup() {
     printf '%s\n' '# Stage 2: Runtime'
     # Bruker samme tag som devel for runtime for å sikre kompatibilitet og tilgang til dev-verktøy hvis nødvendig
     printf 'FROM nvcr.io/nvidia/cuda:%s AS runtime\n' "$DOCKER_CUDA_DEVEL_TAG"
-    printf '\n'
+    printf '\n' # Ensure a blank line for readability if one isn't already there
+    printf '# Set environment variables to make CUDA discoverable\n'
+    printf 'ENV CUDA_HOME=/usr/local/cuda\n'
+    printf 'ENV PATH=/usr/local/cuda/bin:${PATH}\n'
+    printf 'ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}\n'
+    printf '\n' # Add a blank line after for readability
     printf 'ENV %s\n' 'DEBIAN_FRONTEND=noninteractive'
     # git added here in runtime stage in previous commit
     printf 'ARG CACHE_BUSTER_RUNTIME_PACKAGES\n'

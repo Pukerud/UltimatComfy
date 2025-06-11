@@ -144,7 +144,7 @@ main_menu() {
 Image: $COMFYUI_IMAGE_NAME
 
 Choose an option:" \
-                21 76 8 \
+                22 76 9 \
                 "1" "Førstegangs oppsett/Installer ComfyUI i Docker" \
                 "2" "Bygg/Oppdater ComfyUI Docker Image" \
                 "3" "Last ned/Administrer Modeller" \
@@ -152,14 +152,15 @@ Choose an option:" \
                 "5" "Stopp ComfyUI Docker Container(e)" \
                 "6" "Fix Custom Node Python Dependencies" \
                 "7" "Update UltimateComfy" \
-                "8" "Avslutt" \
+                "8" "Oppgrader NVIDIA Driver (Host)" \
+                "9" "Avslutt" \
                 2>/dev/tty)
 
             local dialog_exit_status=$?
             script_log "DEBUG: dialog command finished. main_choice='$main_choice', dialog_exit_status='$dialog_exit_status'"
             if [ $dialog_exit_status -ne 0 ]; then
-                main_choice="8" # Updated for new Avslutt number
-                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 8."
+                main_choice="9" # Updated for new Avslutt number
+                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 9."
             fi
         else
             script_log "DEBUG: Using basic menu fallback."
@@ -176,9 +177,10 @@ Choose an option:" \
             echo "5) Stopp ComfyUI Docker Container(e)"
             echo "6) Fix Custom Node Python Dependencies"
             echo "7) Update UltimateComfy"
-            echo "8) Avslutt"
+            echo "8) Oppgrader NVIDIA Driver (Host)"
+            echo "9) Avslutt"
             echo "--------------------------------"
-            echo -n "Velg et alternativ (1-8): " >&2
+            echo -n "Velg et alternativ (1-9): " >&2
             read -r main_choice </dev/tty
             script_log "DEBUG: Basic menu read finished. main_choice='$main_choice'"
         fi
@@ -256,7 +258,23 @@ Choose an option:" \
                 # main_menu will loop again, or script will have restarted if update occurred
                 ;;
             "8")
-                script_log "DEBUG: main_menu attempting to exit (Option 8)."
+                script_log "INFO: User selected 'Oppgrader NVIDIA Driver (Host)'."
+                local nvidia_upgrade_script_path
+                nvidia_upgrade_script_path="$(dirname "$0")/upgrade_nvidia_driver.sh"
+                if [ -f "$nvidia_upgrade_script_path" ]; then
+                    if [ -x "$nvidia_upgrade_script_path" ]; then
+                        "$nvidia_upgrade_script_path"
+                    else
+                        log_error "FEIL: $nvidia_upgrade_script_path er ikke kjørbar (executable)."
+                        log_error "Kjør 'chmod +x $nvidia_upgrade_script_path' for å fikse."
+                    fi
+                else
+                    log_error "FEIL: $nvidia_upgrade_script_path ble ikke funnet."
+                fi
+                press_enter_to_continue
+                ;;
+            "9")
+                script_log "DEBUG: main_menu attempting to exit (Option 9)."
                 log_info "Avslutter." # from common_utils.sh
                 clear
                 exit 0
@@ -266,7 +284,7 @@ Choose an option:" \
                     # dialog is from common_utils.sh (via ensure_dialog_installed)
                     dialog --title "Ugyldig valg" --msgbox "Vennligst velg et gyldig alternativ fra menyen." 6 50 2>/dev/tty
                 else
-                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-8." # from common_utils.sh
+                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-9." # from common_utils.sh
                 fi
                 press_enter_to_continue # from common_utils.sh
                 ;;
