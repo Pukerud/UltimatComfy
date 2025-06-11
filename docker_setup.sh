@@ -131,7 +131,7 @@ perform_docker_initial_setup() {
         log_warn "Mappen '$BASE_DOCKER_SETUP_DIR' eksisterer allerede."
         local overwrite_choice # Renamed to avoid conflict if main script has same var
         echo -n "Vil du fortsette og potensielt overskrive konfigurasjonsfiler? (ja/nei): " >&2
-        read -r overwrite_choice </dev/tty
+        read -r overwrite_choice
         if [[ ! "$overwrite_choice" =~ ^[Jj][Aa]$ ]]; then
             log_info "Oppsett avbrutt av bruker."
             script_log "DEBUG: EXITING perform_docker_initial_setup (user aborted overwrite)"
@@ -143,7 +143,7 @@ perform_docker_initial_setup() {
     local num_gpus=0
     while true; do
         echo -n "Hvor mange GPUer vil du sette opp ComfyUI for? (f.eks. 1 eller 2): " >&2
-        read -r num_gpus_input </dev/tty
+        read -r num_gpus_input
         if [[ "$num_gpus_input" =~ ^[1-9][0-9]*$ ]]; then
             num_gpus=$num_gpus_input
             break
@@ -197,11 +197,7 @@ perform_docker_initial_setup() {
     # git added here in runtime stage in previous commit
     printf 'ARG CACHE_BUSTER_RUNTIME_PACKAGES\n'
     printf 'RUN %s\n' 'sed -i "s/http:\/\/archive.ubuntu.com\/ubuntu\//http:\/\/de.archive.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && sed -i "s/http:\/\/security.ubuntu.com\/ubuntu\//http:\/\/de.security.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && apt-get update && apt-get install -y --no-install-recommends git python3-pip ffmpeg curl libgl1 build-essential && rm -rf /var/lib/apt/lists/*'
-    printf '\n'
-    printf '# Create symlinks to force CUDA path discovery\n'
-    printf 'RUN ln -s /usr/local/cuda/include/* /usr/include/\n'
-    printf 'RUN ln -s /usr/local/cuda/lib64/* /usr/lib/x86_64-linux-gnu/\n'
-    printf '\n'
+    printf 'RUN ldconfig\n'
     printf 'COPY %s\n' '--from=builder /opt/venv /opt/venv'
     printf 'COPY %s\n' '--from=builder /app/ComfyUI /app/ComfyUI'
     printf 'WORKDIR %s\n' '/app/ComfyUI'
@@ -320,7 +316,7 @@ perform_docker_initial_setup() {
 
     local start_now_choice # Renamed
     echo -n "Vil du starte ComfyUI container(e) nå? (ja/nei): " >&2
-    read -r start_now_choice </dev/tty
+    read -r start_now_choice
     if [[ "$start_now_choice" =~ ^[Jj][Aa]$ ]]; then
         if [[ -f "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh" ]]; then
             "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
@@ -350,7 +346,7 @@ install_comfyui_manager_on_host() {
     if [ -d "$manager_dir" ]; then
         local reinstall_choice # Renamed
         echo -n "ComfyUI-Manager already exists at $manager_dir. Reinstall? (ja/nei): " >&2
-        read -r reinstall_choice </dev/tty
+        read -r reinstall_choice
         if [[ "$reinstall_choice" =~ ^[Jj][Aa]$ ]]; then
             log_info "Removing existing ComfyUI-Manager for reinstall..."
             log_info "Attempting to remove with sudo due to potential permission issues..."
