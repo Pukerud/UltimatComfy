@@ -42,7 +42,7 @@ docker exec "$CONTAINER_NAME" /bin/bash -c '
         fi
     done
 
-    echo "Alle avhengigheter er nå sjekket og installert."
+    echo "Alle avhengigheter er nå sjekket og installert.'"
 '
 
 echo ""
