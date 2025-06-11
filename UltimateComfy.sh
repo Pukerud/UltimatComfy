@@ -147,7 +147,7 @@ view_autodownload_log() {
     echo "--- Viser logg (Ctrl+C for å avslutte) ---"
     # Ensure terminal is available for tail -f
     if [ -t 1 ] ; then
-        tail -f "$log_file_to_tail"
+        (tail -f "$log_file_to_tail")
     else
         log_error "Kan ikke kjøre 'tail -f': Ingen terminal tilgjengelig."
         log_error "Dette valget fungerer best når skriptet kjøres i et interaktivt terminalvindu."
