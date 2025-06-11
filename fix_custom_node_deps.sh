@@ -15,21 +15,9 @@ docker exec "$CONTAINER_NAME" /bin/bash -c '
     set -e # Avslutt hvis en kommando feiler
 
     echo "--- Kjører ComfyUI-Manager sin restore-funksjon (første pass)..."
-    # Ensure we are in the correct directory for cm-cli.py if it's sensitive to CWD
-    if [ -d "/app/ComfyUI/custom_nodes/ComfyUI-Manager" ]; then
-        cd /app/ComfyUI/custom_nodes/ComfyUI-Manager # Changed to manager dir
-        python cm-cli.py restore-dependencies
-    elif [ -f "/app/ComfyUI/manager/main.py" ]; then # Older manager?
-        echo "WARN: ComfyUI-Manager seems to be an older version or in a different location. Trying to run restore from /app/ComfyUI/manager."
-        cd /app/ComfyUI # Fallback to main ComfyUI dir
-        python manager/main.py --restore-dependencies # Hypothetical, check actual command for older manager
-    elif [ -f "/app/ComfyUI/main.py" ] && [ -d "/app/ComfyUI/custom_nodes/ComfyUI-Manager" ]; then # Standard location check
-        echo "Standard ComfyUI-Manager location found."
-        cd /app/ComfyUI # Ensure we are in /app/ComfyUI for the script path
-        python custom_nodes/ComfyUI-Manager/cm-cli.py restore-dependencies
-    else
-        echo "ERROR: ComfyUI-Manager cm-cli.py not found in expected locations (/app/ComfyUI/custom_nodes/ComfyUI-Manager/cm-cli.py or /app/ComfyUI/manager/main.py with restore flag). Skipping manager restore."
-    fi
+    # Navigate to ComfyUI directory and run the manager script
+    cd /app/ComfyUI
+    python custom_nodes/ComfyUI-Manager/cm-cli.py restore-dependencies
 
     echo "---"
     echo "--- Kjører en manuell, garantert sjekk av ALLE noder (andre pass)..."
@@ -41,6 +29,16 @@ docker exec "$CONTAINER_NAME" /bin/bash -c '
             pip install -r "${d}requirements.txt"
         fi
     done
+
+
+    echo "--- Installerer spesifikke tilleggspakker ---"
+    pip install --upgrade huggingface_hub diffusers
+    pip install opencv-python-headless
+    pip install deepdiff
+    pip install piexif
+    pip install py-cpuinfo
+    pip install pynvml
+
 
     echo "Alle avhengigheter er nå sjekket og installert.'"
 '
