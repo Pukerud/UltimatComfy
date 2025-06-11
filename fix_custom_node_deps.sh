@@ -30,6 +30,7 @@ docker exec "$CONTAINER_NAME" /bin/bash -c '
         fi
     done
 
+
     echo "--- Installerer spesifikke tilleggspakker ---"
     pip install --upgrade huggingface_hub diffusers
     pip install opencv-python-headless
@@ -37,6 +38,7 @@ docker exec "$CONTAINER_NAME" /bin/bash -c '
     pip install piexif
     pip install py-cpuinfo
     pip install pynvml
+
 
     echo "Alle avhengigheter er nå sjekket og installert.'"
 '
