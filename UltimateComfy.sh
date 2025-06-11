@@ -15,6 +15,105 @@ source "$(dirname "$0")/model_downloader.sh" || { echo "ERROR: model_downloader.
 # SCRIPT_LOG_FILE is defined in common_utils.sh
 trap 'script_log "INFO: --- UltimateComfy.sh execution finished with exit status $? ---"' EXIT
 
+perform_self_update() {
+    script_log "INFO: Attempting self-update..."
+    local script_path_abs
+    script_path_abs=$(readlink -f "$0") # Absolute path to the currently running script
+    local script_dir
+    script_dir=$(dirname "$script_path_abs")
+
+    if [ ! -d "$script_dir/.git" ]; then
+        log_error "FEIL: Dette skriptet ser ikke ut til å være i en Git repository-mappe."
+        log_error "Kan ikke oppdatere. Gå til $script_dir og initialiser git eller klon på nytt."
+        press_enter_to_continue
+        return
+    fi
+
+    # Change to the script's directory to ensure git commands run in the correct context
+    cd "$script_dir" || { log_error "FEIL: Kunne ikke bytte til mappen $script_dir"; press_enter_to_continue; return; }
+
+    log_info "Sjekker for oppdateringer (git fetch)..."
+    git fetch || {
+        log_error "FEIL: 'git fetch' mislyktes. Sjekk internettforbindelsen og Git-oppsettet."
+        press_enter_to_continue
+        cd - > /dev/null # Return to previous directory
+        return
+    }
+
+    local local_commit
+    local remote_commit
+    local_commit=$(git rev-parse HEAD)
+    remote_commit=$(git rev-parse '@{u}') # Equivalent to origin/main or whatever the upstream is
+
+    if [ "$local_commit" = "$remote_commit" ]; then
+        log_info "Du har allerede den nyeste versjonen."
+        press_enter_to_continue
+        cd - > /dev/null
+        return
+    fi
+
+    log_info "Ny versjon tilgjengelig. Prøver å oppdatere (git pull)..."
+    # Stash any local changes to avoid conflicts, apply them after pull
+    local stash_needed=false
+    if ! git diff --quiet HEAD; then
+        log_info "Lokale endringer funnet. Prøver å midlertidig lagre dem (git stash)..."
+        git stash push -u -m "Autostash before update" && stash_needed=true || {
+            log_error "FEIL: 'git stash' mislyktes. Løs konflikter manuelt og prøv igjen."
+            press_enter_to_continue
+            cd - > /dev/null
+            return
+        }
+    fi
+
+    # Store the modification timestamp or checksum of the script itself before pull
+    local pre_update_checksum=""
+    if [[ -f "$script_path_abs" ]]; then # Ensure script_path_abs is valid file
+        pre_update_checksum=$(md5sum "$script_path_abs" | awk '{print $1}')
+    fi
+
+    if git pull --ff-only; then # Using --ff-only to avoid merge commits, prefer rebase if needed
+        log_info "Oppdatering vellykket."
+        if [ "$stash_needed" = true ]; then
+            log_info "Prøver å gjenopprette midlertidig lagrede endringer (git stash pop)..."
+            if ! git stash pop; then
+                log_warn "Kunne ikke automatisk gjenopprette midlertidig lagrede endringer."
+                log_warn "Du må kanskje kjøre 'git stash apply' manuelt for å løse konflikter."
+            fi
+        fi
+
+        local post_update_checksum=""
+        if [[ -f "$script_path_abs" ]]; then # Ensure script_path_abs is valid file after potential changes
+             post_update_checksum=$(md5sum "$script_path_abs" | awk '{print $1}')
+        fi
+
+        # Check if the script itself was updated or if any update happened
+        local new_local_commit
+        new_local_commit=$(git rev-parse HEAD)
+
+        if [ "$new_local_commit" != "$local_commit" ] && [ "$pre_update_checksum" != "$post_update_checksum" ]; then
+            log_info "UltimateComfy.sh ble oppdatert. Starter på nytt..."
+            press_enter_to_continue
+            cd - > /dev/null # Return to original directory before exec
+            exec "$script_path_abs" "$@" # Use script_path_abs for exec
+        elif [ "$new_local_commit" != "$local_commit" ]; then
+            log_info "Oppdateringer ble lastet ned, men UltimateComfy.sh ble ikke endret. Går tilbake til menyen."
+            press_enter_to_continue
+        else
+            # This case should ideally not be hit if local_commit != remote_commit
+            log_info "Ingen endringer i UltimateComfy.sh etter pull, selv om HEAD endret seg. Merkelig."
+            press_enter_to_continue
+        fi
+    else
+        log_error "FEIL: 'git pull' mislyktes. Løs eventuelle konflikter manuelt i mappen $script_dir og prøv igjen."
+        if [ "$stash_needed" = true ]; then
+            log_warn "Dine lokale endringer er fortsatt i 'stash'. Du kan gjenopprette dem med 'git stash pop' etter å ha løst pull-konflikter."
+        fi
+        press_enter_to_continue
+    fi
+
+    cd - > /dev/null # Return to original directory if not restarting
+}
+
 # --- Hovedmeny Funksjon ---
 main_menu() {
     # Ensure paths are initialized once for the menu context if needed for display or passing.
@@ -45,21 +144,22 @@ main_menu() {
 Image: $COMFYUI_IMAGE_NAME
 
 Choose an option:" \
-                20 76 7 \
+                21 76 8 \
                 "1" "Førstegangs oppsett/Installer ComfyUI i Docker" \
                 "2" "Bygg/Oppdater ComfyUI Docker Image" \
                 "3" "Last ned/Administrer Modeller" \
                 "4" "Start ComfyUI Docker Container(e)" \
                 "5" "Stopp ComfyUI Docker Container(e)" \
                 "6" "Fix Custom Node Python Dependencies" \
-                "7" "Avslutt" \
+                "7" "Update UltimateComfy" \
+                "8" "Avslutt" \
                 2>/dev/tty)
 
             local dialog_exit_status=$?
             script_log "DEBUG: dialog command finished. main_choice='$main_choice', dialog_exit_status='$dialog_exit_status'"
             if [ $dialog_exit_status -ne 0 ]; then
-                main_choice="7"
-                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 7."
+                main_choice="8" # Updated for new Avslutt number
+                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 8."
             fi
         else
             script_log "DEBUG: Using basic menu fallback."
@@ -75,9 +175,10 @@ Choose an option:" \
             echo "4) Start ComfyUI Docker Container(e)"
             echo "5) Stopp ComfyUI Docker Container(e)"
             echo "6) Fix Custom Node Python Dependencies"
-            echo "7) Avslutt"
+            echo "7) Update UltimateComfy"
+            echo "8) Avslutt"
             echo "--------------------------------"
-            echo -n "Velg et alternativ (1-7): " >&2
+            echo -n "Velg et alternativ (1-8): " >&2
             read -r main_choice </dev/tty
             script_log "DEBUG: Basic menu read finished. main_choice='$main_choice'"
         fi
@@ -150,7 +251,12 @@ Choose an option:" \
                 press_enter_to_continue # from common_utils.sh
                 ;;
             "7")
-                script_log "DEBUG: main_menu attempting to exit (Option 7)."
+                script_log "INFO: User selected 'Update UltimateComfy'."
+                perform_self_update
+                # main_menu will loop again, or script will have restarted if update occurred
+                ;;
+            "8")
+                script_log "DEBUG: main_menu attempting to exit (Option 8)."
                 log_info "Avslutter." # from common_utils.sh
                 clear
                 exit 0
@@ -160,7 +266,7 @@ Choose an option:" \
                     # dialog is from common_utils.sh (via ensure_dialog_installed)
                     dialog --title "Ugyldig valg" --msgbox "Vennligst velg et gyldig alternativ fra menyen." 6 50 2>/dev/tty
                 else
-                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-7." # from common_utils.sh
+                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-8." # from common_utils.sh
                 fi
                 press_enter_to_continue # from common_utils.sh
                 ;;
