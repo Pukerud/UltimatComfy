@@ -189,7 +189,7 @@ perform_docker_initial_setup() {
     printf '\n'
     printf 'ENV %s\n' 'DEBIAN_FRONTEND=noninteractive'
     # git added here in runtime stage in previous commit
-    printf 'RUN %s\n' 'sed -i "s/http:\/\/archive.ubuntu.com\/ubuntu\//http:\/\/de.archive.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && sed -i "s/http:\/\/security.ubuntu.com\/ubuntu\//http:\/\/de.security.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && apt-get update && apt-get install -y --no-install-recommends git python3-pip ffmpeg curl libgl1 && rm -rf /var/lib/apt/lists/*'
+    printf 'RUN %s\n' 'sed -i "s/http:\/\/archive.ubuntu.com\/ubuntu\//http:\/\/de.archive.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && sed -i "s/http:\/\/security.ubuntu.com\/ubuntu\//http:\/\/de.security.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && apt-get update && apt-get install -y --no-install-recommends git python3-pip ffmpeg curl libgl1 build-essential && rm -rf /var/lib/apt/lists/*'
     printf 'COPY %s\n' '--from=builder /opt/venv /opt/venv'
     printf 'COPY %s\n' '--from=builder /app/ComfyUI /app/ComfyUI'
     printf 'WORKDIR %s\n' '/app/ComfyUI'
