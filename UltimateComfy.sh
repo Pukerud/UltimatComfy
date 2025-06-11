@@ -114,6 +114,51 @@ perform_self_update() {
     cd - > /dev/null # Return to original directory if not restarting
 }
 
+view_autodownload_log() {
+    log_info "Viser Auto-Download Service logg..."
+    # BASE_DOCKER_SETUP_DIR is from common_utils.sh, should be available
+    if [[ -z "$BASE_DOCKER_SETUP_DIR" ]]; then
+        log_error "BASE_DOCKER_SETUP_DIR er ikke satt. Kan ikke bestemme loggfilsti."
+        press_enter_to_continue
+        return
+    fi
+
+    local primary_log_path="$BASE_DOCKER_SETUP_DIR/auto_download_service.log"
+    local fallback_log_path="/tmp/auto_download_service.log"
+    local log_file_to_tail=""
+
+    if [ -f "$primary_log_path" ]; then
+        log_file_to_tail="$primary_log_path"
+    elif [ -f "$fallback_log_path" ]; then
+        log_warn "Primær loggfil ikke funnet på $primary_log_path."
+        log_info "Bruker fallback loggfil: $fallback_log_path"
+        log_file_to_tail="$fallback_log_path"
+    else
+        log_error "Loggfil for auto-download service ikke funnet."
+        log_error "Sjekket: $primary_log_path"
+        log_error "Og:      $fallback_log_path"
+        log_warn "Sørg for at Docker containerne er startet og at tjenesten kjører."
+        press_enter_to_continue
+        return
+    fi
+
+    log_info "Bruker loggfil: $log_file_to_tail"
+    log_info "Trykk Ctrl+C for å avslutte loggvisningen og returnere til menyen."
+    echo "--- Viser logg (Ctrl+C for å avslutte) ---"
+    # Ensure terminal is available for tail -f
+    if [ -t 1 ] ; then
+        tail -f "$log_file_to_tail"
+    else
+        log_error "Kan ikke kjøre 'tail -f': Ingen terminal tilgjengelig."
+        log_error "Dette valget fungerer best når skriptet kjøres i et interaktivt terminalvindu."
+    fi
+    # After tail -f is exited (Ctrl+C), the script continues here.
+    # A press_enter_to_continue will be handled by the main loop after the case statement.
+    # No explicit press_enter_to_continue needed here unless we want to pause before the menu redraws.
+    # For now, let it fall through, and the main loop's press_enter will catch it if no dialog.
+    echo "--- Loggvisning avsluttet ---"
+}
+
 # --- Hovedmeny Funksjon ---
 main_menu() {
     # Ensure paths are initialized once for the menu context if needed for display or passing.
@@ -144,7 +189,7 @@ main_menu() {
 Image: $COMFYUI_IMAGE_NAME
 
 Choose an option:" \
-                22 76 9 \
+                22 76 10 \
                 "1" "Førstegangs oppsett/Installer ComfyUI i Docker" \
                 "2" "Bygg/Oppdater ComfyUI Docker Image" \
                 "3" "Last ned/Administrer Modeller" \
@@ -153,14 +198,15 @@ Choose an option:" \
                 "6" "Fix Custom Node Python Dependencies" \
                 "7" "Update UltimateComfy" \
                 "8" "Oppgrader NVIDIA Driver (Host)" \
-                "9" "Avslutt" \
+                "9" "Se Auto-Download Service Logg" \
+                "10" "Avslutt" \
                 2>/dev/tty)
 
             local dialog_exit_status=$?
             script_log "DEBUG: dialog command finished. main_choice='$main_choice', dialog_exit_status='$dialog_exit_status'"
             if [ $dialog_exit_status -ne 0 ]; then
-                main_choice="9" # Updated for new Avslutt number
-                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 9."
+                main_choice="10" # Updated for new Avslutt number
+                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 10."
             fi
         else
             script_log "DEBUG: Using basic menu fallback."
@@ -178,9 +224,10 @@ Choose an option:" \
             echo "6) Fix Custom Node Python Dependencies"
             echo "7) Update UltimateComfy"
             echo "8) Oppgrader NVIDIA Driver (Host)"
-            echo "9) Avslutt"
+            echo "9) Se Auto-Download Service Logg"
+            echo "10) Avslutt"
             echo "--------------------------------"
-            echo -n "Velg et alternativ (1-9): " >&2
+            echo -n "Velg et alternativ (1-10): " >&2
             read -r main_choice </dev/tty
             script_log "DEBUG: Basic menu read finished. main_choice='$main_choice'"
         fi
@@ -274,7 +321,12 @@ Choose an option:" \
                 press_enter_to_continue
                 ;;
             "9")
-                script_log "DEBUG: main_menu attempting to exit (Option 9)."
+                script_log "INFO: User selected 'Se Auto-Download Service Logg'."
+                view_autodownload_log
+                press_enter_to_continue
+                ;;
+            "10")
+                script_log "DEBUG: main_menu attempting to exit (Option 10)."
                 log_info "Avslutter." # from common_utils.sh
                 clear
                 exit 0
@@ -284,7 +336,7 @@ Choose an option:" \
                     # dialog is from common_utils.sh (via ensure_dialog_installed)
                     dialog --title "Ugyldig valg" --msgbox "Vennligst velg et gyldig alternativ fra menyen." 6 50 2>/dev/tty
                 else
-                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-9." # from common_utils.sh
+                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-10." # from common_utils.sh
                 fi
                 press_enter_to_continue # from common_utils.sh
                 ;;
