@@ -197,6 +197,11 @@ perform_docker_initial_setup() {
     # git added here in runtime stage in previous commit
     printf 'ARG CACHE_BUSTER_RUNTIME_PACKAGES\n'
     printf 'RUN %s\n' 'sed -i "s/http:\/\/archive.ubuntu.com\/ubuntu\//http:\/\/de.archive.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && sed -i "s/http:\/\/security.ubuntu.com\/ubuntu\//http:\/\/de.security.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && apt-get update && apt-get install -y --no-install-recommends git python3-pip ffmpeg curl libgl1 build-essential && rm -rf /var/lib/apt/lists/*'
+    printf '\n'
+    printf '# Create symlinks to force CUDA path discovery\n'
+    printf 'RUN ln -s /usr/local/cuda/include/* /usr/include/\n'
+    printf 'RUN ln -s /usr/local/cuda/lib64/* /usr/lib/x86_64-linux-gnu/\n'
+    printf '\n'
     printf 'COPY %s\n' '--from=builder /opt/venv /opt/venv'
     printf 'COPY %s\n' '--from=builder /app/ComfyUI /app/ComfyUI'
     printf 'WORKDIR %s\n' '/app/ComfyUI'
