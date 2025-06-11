@@ -12,7 +12,6 @@ echo "Dette er en utvidet prosess og kan ta flere minutter. Vær tålmodig."
 # Kjører et robust installasjonsscript non-interaktivt inne i containeren.
 # Dette scriptet kjører FØRST Managerens verktøy, og DERETTER en manuell sjekk for å fange alt det overser.
 docker exec "$CONTAINER_NAME" /bin/bash -c '
-    set -e # Avslutt hvis en kommando feiler
 
     echo "--- Kjører ComfyUI-Manager sin restore-funksjon (første pass)..."
     # Navigate to ComfyUI directory and run the manager script
