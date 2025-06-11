@@ -183,6 +183,7 @@ perform_docker_initial_setup() {
     printf 'RUN %s\n' 'git clone https://github.com/comfyanonymous/ComfyUI.git'
     printf 'WORKDIR %s\n' '/app/ComfyUI'
     printf 'RUN %s\n' 'pip install --no-cache-dir -r requirements.txt'
+    printf 'RUN %s\n' 'pip install --no-cache-dir sageattention==1.0.6'
     printf '\n'
     printf '%s\n' '# Stage 2: Runtime'
     # Bruker samme tag som devel for runtime for å sikre kompatibilitet og tilgang til dev-verktøy hvis nødvendig
