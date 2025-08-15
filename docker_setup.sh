@@ -43,8 +43,17 @@ check_docker_status() {
         script_log "DEBUG: EXITING check_docker_status (docker not installed)"
         return 1
     fi
+
+    # Attempt to ensure DNS is configured correctly before checking daemon status.
+    if ! ensure_docker_dns; then
+        log_error "Docker DNS configuration failed. Cannot proceed."
+        script_log "DEBUG: EXITING check_docker_status (DNS config failed)"
+        return 1
+    fi
+
     if ! docker info > /dev/null 2>&1; then
         log_error "Kan ikke koble til Docker daemon. Er Docker startet og kjører?"
+        log_error "Dette kan skje selv etter en vellykket DNS-konfigurasjon hvis Docker-tjenesten har et annet problem."
         script_log "DEBUG: EXITING check_docker_status (docker daemon not reachable)"
         return 1
     fi
