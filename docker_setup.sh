@@ -176,7 +176,7 @@ perform_docker_initial_setup() {
     printf '\n'
     printf 'ENV %s\n' 'DEBIAN_FRONTEND=noninteractive'
     # git was already here in builder stage
-    printf 'RUN %s\n' 'sed -i "s/http:\/\/archive.ubuntu.com\/ubuntu\//http:\/\/de.archive.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && sed -i "s/http:\/\/security.ubuntu.com\/ubuntu\//http:\/\/de.security.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && apt-get update && apt-get install -y --no-install-recommends git python3-pip python3-venv ffmpeg curl && rm -rf /var/lib/apt/lists/*'
+    printf 'RUN %s\n' 'apt-get update && apt-get install -y --no-install-recommends git python3-pip python3-venv ffmpeg curl && rm -rf /var/lib/apt/lists/*'
     printf 'RUN %s\n' 'python3 -m venv /opt/venv'
     printf 'ENV PATH="/opt/venv/bin:%s"\n' '$PATH'
     printf 'WORKDIR %s\n' '/app'
@@ -197,7 +197,7 @@ perform_docker_initial_setup() {
     printf 'ENV %s\n' 'DEBIAN_FRONTEND=noninteractive'
     # git added here in runtime stage in previous commit
     printf 'ARG CACHE_BUSTER_RUNTIME_PACKAGES\n'
-    printf 'RUN %s\n' 'sed -i "s/http:\/\/archive.ubuntu.com\/ubuntu\//http:\/\/de.archive.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && sed -i "s/http:\/\/security.ubuntu.com\/ubuntu\//http:\/\/de.security.ubuntu.com\/ubuntu\//g" /etc/apt/sources.list && apt-get update && apt-get install -y --no-install-recommends git python3-pip ffmpeg curl libgl1 build-essential gcc python3-dev && rm -rf /var/lib/apt/lists/*'
+    printf 'RUN %s\n' 'apt-get update && apt-get install -y --no-install-recommends git python3-pip ffmpeg curl libgl1 build-essential gcc python3-dev && rm -rf /var/lib/apt/lists/*'
     printf 'RUN ldconfig\n'
     printf 'COPY %s\n' '--from=builder /opt/venv /opt/venv'
     printf 'COPY %s\n' '--from=builder /app/ComfyUI /app/ComfyUI'
