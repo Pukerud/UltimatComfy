@@ -4,6 +4,8 @@
 # Assuming common_utils.sh is in the same directory
 # shellcheck source=./common_utils.sh
 source "$(dirname "$0")/common_utils.sh" || { echo "ERROR: common_utils.sh not found or failed to source."; exit 1; }
+# shellcheck source=./docker_setup.sh
+source "$(dirname "$0")/docker_setup.sh" || { echo "ERROR: docker_setup.sh not found or failed to source. Exiting."; exit 1; }
 
 script_log "INFO: update_frontend.sh started."
 
