@@ -189,7 +189,7 @@ main_menu() {
 Image: $COMFYUI_IMAGE_NAME
 
 Choose an option:" \
-                22 76 10 \
+                22 76 11 \
                 "1" "Førstegangs oppsett/Installer ComfyUI i Docker" \
                 "2" "Bygg/Oppdater ComfyUI Docker Image" \
                 "3" "Last ned/Administrer Modeller" \
@@ -199,14 +199,15 @@ Choose an option:" \
                 "7" "Update UltimateComfy" \
                 "8" "Oppgrader NVIDIA Driver (Host)" \
                 "9" "Se Auto-Download Service Logg" \
-                "10" "Avslutt" \
+                "10" "Update Frontend" \
+                "11" "Avslutt" \
                 2>/dev/tty)
 
             local dialog_exit_status=$?
             script_log "DEBUG: dialog command finished. main_choice='$main_choice', dialog_exit_status='$dialog_exit_status'"
             if [ $dialog_exit_status -ne 0 ]; then
-                main_choice="10" # Updated for new Avslutt number
-                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 10."
+                main_choice="11" # Updated for new Avslutt number
+                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 11."
             fi
         else
             script_log "DEBUG: Using basic menu fallback."
@@ -225,9 +226,10 @@ Choose an option:" \
             echo "7) Update UltimateComfy"
             echo "8) Oppgrader NVIDIA Driver (Host)"
             echo "9) Se Auto-Download Service Logg"
-            echo "10) Avslutt"
+            echo "10) Update Frontend"
+            echo "11) Avslutt"
             echo "--------------------------------"
-            echo -n "Velg et alternativ (1-10): " >&2
+            echo -n "Velg et alternativ (1-11): " >&2
             read -r main_choice </dev/tty
             script_log "DEBUG: Basic menu read finished. main_choice='$main_choice'"
         fi
@@ -326,7 +328,18 @@ Choose an option:" \
                 press_enter_to_continue
                 ;;
             "10")
-                script_log "DEBUG: main_menu attempting to exit (Option 10)."
+                script_log "INFO: User selected 'Update Frontend'."
+                local update_frontend_script_path
+                update_frontend_script_path="$(dirname "$0")/update_frontend.sh"
+                if [ -x "$update_frontend_script_path" ]; then
+                    "$update_frontend_script_path"
+                else
+                    log_error "Update frontend script not found or not executable at $update_frontend_script_path."
+                fi
+                press_enter_to_continue
+                ;;
+            "11")
+                script_log "DEBUG: main_menu attempting to exit (Option 11)."
                 log_info "Avslutter." # from common_utils.sh
                 clear
                 exit 0
@@ -336,7 +349,7 @@ Choose an option:" \
                     # dialog is from common_utils.sh (via ensure_dialog_installed)
                     dialog --title "Ugyldig valg" --msgbox "Vennligst velg et gyldig alternativ fra menyen." 6 50 2>/dev/tty
                 else
-                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-10." # from common_utils.sh
+                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-11." # from common_utils.sh
                 fi
                 press_enter_to_continue # from common_utils.sh
                 ;;
