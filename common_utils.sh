@@ -81,6 +81,84 @@ ensure_dialog_installed() {
     fi
 }
 
+ensure_docker_dns() {
+    script_log "DEBUG: ENTERING ensure_docker_dns (common_utils.sh)"
+    local DAEMON_JSON_FILE="/etc/docker/daemon.json"
+
+    # If DNS is already configured, we don't need to do anything.
+    if [ -f "$DAEMON_JSON_FILE" ] && grep -q '"dns"' "$DAEMON_JSON_FILE"; then
+        script_log "DEBUG: Docker daemon appears to have DNS configured already."
+        script_log "DEBUG: EXITING ensure_docker_dns (no action taken)"
+        return 0
+    fi
+
+    log_warn "Docker DNS configuration not found or incomplete. Attempting to configure it."
+
+    # Ensure the directory exists
+    if [ ! -d "$(dirname "$DAEMON_JSON_FILE")" ]; then
+        log_info "Creating directory $(dirname "$DAEMON_JSON_FILE")"
+        if ! sudo mkdir -p "$(dirname "$DAEMON_JSON_FILE")"; then
+            log_error "Failed to create directory for daemon.json. Please check permissions."
+            return 1
+        fi
+    fi
+
+    # Backup the existing file if it exists
+    local DAEOMN_JSON_BACKUP="/etc/docker/daemon.json.bak.$(date +%s)"
+    if [ -f "$DAEMON_JSON_FILE" ]; then
+        log_info "Backing up existing $DAEMON_JSON_FILE to $DAEOMN_JSON_BACKUP"
+        if ! sudo cp "$DAEMON_JSON_FILE" "$DAEOMN_JSON_BACKUP"; then
+            log_error "Failed to create backup. Aborting automatic configuration."
+            return 1
+        fi
+    fi
+
+    # Prepare the DNS string
+    local DNS_STRING='"dns": ["8.8.8.8", "8.8.4.4"]'
+
+    # Case 1: The file does not exist or is empty/whitespace.
+    if [ ! -s "$DAEMON_JSON_FILE" ]; then
+        log_info "$DAEMON_JSON_FILE is missing or empty. Creating a new one with DNS settings."
+        printf '{\n  %s\n}\n' "$DNS_STRING" | sudo tee "$DAEMON_JSON_FILE" > /dev/null
+    else
+        # Case 2: The file exists and has content. We need to add the DNS key.
+        log_info "Adding DNS configuration to existing $DAEMON_JSON_FILE."
+        # This is a bit tricky with sed. We remove the last '}' brace, add our key, and add the brace back.
+        # This assumes the last '}' is on its own line or at least the last character.
+        # We first remove any trailing whitespace from the file, then remove the last line if it's '}'
+        # then add a comma to the new last line, then add our dns and the final '}'.
+        local temp_json
+        temp_json=$(sudo sed -e 's/[[:space:]]*$//' "$DAEMON_JSON_FILE" | sed '/^}$/d')
+
+        # Add a comma to the new last line if it doesn't have one
+        if [[ "$(echo -n "$temp_json" | tail -c 1)" != "," ]]; then
+            temp_json=$(echo "$temp_json" | sed '$s/$/,/')
+        fi
+
+        printf '%s\n  %s\n}\n' "$temp_json" "$DNS_STRING" | sudo tee "$DAEMON_JSON_FILE" > /dev/null
+    fi
+
+    log_info "Attempting to restart Docker to apply new settings..."
+    if sudo systemctl restart docker; then
+        log_success "Docker restarted successfully with new DNS settings."
+        script_log "DEBUG: EXITING ensure_docker_dns (restart successful)"
+        return 0
+    else
+        log_error "Failed to restart Docker after modifying $DAEMON_JSON_FILE."
+        log_error "Your Docker configuration might be broken."
+        if [ -f "$DAEOMN_JSON_BACKUP" ]; then
+            log_info "Attempting to restore from backup: $DAEOMN_JSON_BACKUP"
+            if sudo mv "$DAEOMN_JSON_BACKUP" "$DAEMON_JSON_FILE"; then
+                log_success "Restored daemon.json from backup. Please try restarting Docker manually."
+            else
+                log_error "COULD NOT RESTORE FROM BACKUP. Please do so manually: sudo mv $DAEOMN_JSON_BACKUP $DAEMON_JSON_FILE"
+            fi
+        fi
+        script_log "DEBUG: EXITING ensure_docker_dns (restart failed)"
+        return 1
+    fi
+}
+
 check_and_perform_nvcr_login() {
     script_log "DEBUG: ENTERING check_and_perform_nvcr_login (common_utils.sh)"
 
