@@ -81,4 +81,50 @@ ensure_dialog_installed() {
     fi
 }
 
+check_and_perform_nvcr_login() {
+    script_log "DEBUG: ENTERING check_and_perform_nvcr_login (common_utils.sh)"
+
+    # Check if docker config exists and contains nvcr.io login
+    if [ -f "$HOME/.docker/config.json" ] && grep -q "nvcr.io" "$HOME/.docker/config.json"; then
+        log_info "Docker login for nvcr.io already configured."
+        script_log "DEBUG: nvcr.io login found in Docker config. Skipping interactive login."
+        script_log "DEBUG: EXITING check_and_perform_nvcr_login (already logged in)"
+        return 0
+    fi
+
+    log_warn "Docker login for nvcr.io not found."
+    log_info "To build the Docker image, login to NVIDIA's Container Registry (nvcr.io) is required."
+    log_info "This requires an NVIDIA NGC API Key."
+    log_info "You can get a key from: https://ngc.nvidia.com/setup/api-key"
+
+    local nv_api_key
+    while true; do
+        echo -n "Please enter your NVIDIA NGC API Key (will be hidden): " >&2
+        read -s nv_api_key </dev/tty
+        echo "" # Newline after reading the key
+        if [ -n "$nv_api_key" ]; then
+            break
+        else
+            log_warn "API Key cannot be empty. Please try again."
+        fi
+    done
+
+    log_info "Attempting to log in to nvcr.io..."
+    if echo "$nv_api_key" | docker login nvcr.io --username '$oauthtoken' --password-stdin; then
+        log_success "Successfully logged in to nvcr.io."
+        log_info "Your credentials are now stored locally for future Docker builds."
+        script_log "DEBUG: EXITING check_and_perform_nvcr_login (login successful)"
+        # Clear the variable just in case
+        unset nv_api_key
+        return 0
+    else
+        log_error "Failed to log in to nvcr.io. Please check your API Key and try again."
+        script_log "ERROR: docker login to nvcr.io failed."
+        # Clear the variable just in case
+        unset nv_api_key
+        script_log "DEBUG: EXITING check_and_perform_nvcr_login (login failed)"
+        return 1
+    fi
+}
+
 script_log "DEBUG: common_utils.sh execution finished its own content."
