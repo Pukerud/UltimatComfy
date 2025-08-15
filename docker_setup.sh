@@ -54,6 +54,13 @@ check_docker_status() {
 
 build_comfyui_image() {
     script_log "DEBUG: ENTERING build_comfyui_image (docker_setup.sh)"
+
+    if ! check_and_perform_nvcr_login; then
+        log_error "NVIDIA Container Registry login failed or was skipped. Aborting build."
+        script_log "DEBUG: EXITING build_comfyui_image (nvcr login failed)"
+        return 1
+    fi
+
     # initialize_docker_paths # This should be called before this function if paths are needed immediately.
                             # Or ensure it's called if DOCKER_CONFIG_ACTUAL_PATH is empty.
     if [[ -z "$DOCKER_CONFIG_ACTUAL_PATH" ]]; then
