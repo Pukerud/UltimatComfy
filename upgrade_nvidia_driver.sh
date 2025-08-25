@@ -152,7 +152,12 @@ if $SMI_WORKS && [ -n "$CURRENT_DRIVER_VERSION_CORE" ] && [ -n "$INSTALLED_LIB_P
    [ "$CURRENT_DRIVER_VERSION_CORE" == "$INSTALLED_LIB_PKG_VERSION_CORE" ] && \
    [[ "$CURRENT_DRIVER_VERSION_CORE" == $TARGET_DRIVER_MAJOR_VERSION* ]]; then
     log_success "Systemet ser ut til å være OK og allerede på $TARGET_DRIVER_MAJOR_VERSION serien. Driver: $CURRENT_DRIVER_VERSION_CORE."
-    exit 0
+	read -r -p "Vil du tvinge en reinstallasjon uansett? (y/N): " choice
+    if [[ ! "$choice" =~ ^[Yy]$ ]]; then
+        log_info "Avbryter."
+        exit 0
+    fi
+    log_info "Fortsetter med reinstallasjon på brukerens forespørsel."
 fi
 
 log_warn "Driver/Bibliotek er enten i mismatch, feil versjon, eller nvidia-smi feiler."
