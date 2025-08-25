@@ -1,21 +1,27 @@
 #!/bin/bash
 
 # --- Konfigurasjon ---
-# Sikter mot 570-serien som er den nyeste stabile.
-TARGET_DRIVER_MAJOR_VERSION="570"
-# Du kan overstyre dette med et argument, f.eks.: sudo ./upgrade_nvidia_to_570.sh 570.30.02
+# Disse vil bli satt av brukeren under kjøring.
 SPECIFIC_TARGET_VERSION=""
-if [ -n "$1" ]; then
-    SPECIFIC_TARGET_VERSION="$1"
-    TARGET_DRIVER_MAJOR_VERSION=$(echo "$SPECIFIC_TARGET_VERSION" | cut -d. -f1)
-    echo "[INFO] Spesifikk målversjon gitt: $SPECIFIC_TARGET_VERSION. Hovedserie: $TARGET_DRIVER_MAJOR_VERSION"
-fi
+TARGET_DRIVER_MAJOR_VERSION=""
 
 # --- Funksjoner ---
 log_info() { echo "[INFO] $1"; }
 log_warn() { echo "[WARN] $1"; }
 log_error() { echo "[ERROR] $1" >&2; }
 log_success() { echo "[SUCCESS] $1"; }
+
+discover_driver_series() {
+    # Søker etter driver-metapakker, trekker ut serienummeret, sorterer numerisk og fjerner duplikater.
+    apt-cache search --names-only '^nvidia-driver-[0-9]+$' | cut -d- -f3 | sort -un
+}
+
+discover_specific_versions() {
+    local series="$1"
+    log_info "Søker etter spesifikke versjoner i $series-serien..."
+    # Bruker apt-cache madison for å finne versjoner for metapakken
+    apt-cache madison "nvidia-driver-$series" | awk '{print $3}'
+}
 
 check_sudo() {
     if [ "$EUID" -ne 0 ]; then
@@ -75,7 +81,68 @@ extract_core_version() {
 check_sudo
 ensure_graphics_drivers_ppa
 
-log_info "Starter NVIDIA driver og bibliotekssynkroniseringssjekk for $TARGET_DRIVER_MAJOR_VERSION serien."
+# --- Serie- og versjonsvalg ---
+log_info "Starter interaktivt valg av NVIDIA driver..."
+
+# Oppdag og velg driver-serie
+SERIES_LIST=($(discover_driver_series))
+if [ ${#SERIES_LIST[@]} -eq 0 ]; then
+    log_error "Klarte ikke å finne noen tilgjengelige NVIDIA driver-serier."
+    log_error "Sjekk at PPA (ppa:graphics-drivers/ppa) er riktig konfigurert og at 'apt-cache search' fungerer."
+    exit 1
+fi
+
+log_info "Følgende driver-serier ble funnet:"
+for i in "${!SERIES_LIST[@]}"; do
+    printf "  %d) %s\n" "$((i+1))" "${SERIES_LIST[$i]}"
+done
+
+SERIES_CHOICE=""
+while true; do
+    read -r -p "Vennligst velg en serie å installere fra (1-${#SERIES_LIST[@]}): " SERIES_CHOICE
+    if [[ "$SERIES_CHOICE" =~ ^[0-9]+$ ]] && [ "$SERIES_CHOICE" -ge 1 ] && [ "$SERIES_CHOICE" -le ${#SERIES_LIST[@]} ]; then
+        TARGET_DRIVER_MAJOR_VERSION="${SERIES_LIST[$((SERIES_CHOICE-1))]}"
+        log_info "Du har valgt $TARGET_DRIVER_MAJOR_VERSION serien."
+        break
+    else
+        log_warn "Ugyldig valg. Vennligst skriv inn et tall mellom 1 og ${#SERIES_LIST[@]}."
+    fi
+done
+
+# Oppdag og velg spesifikk versjon
+VERSION_LIST=($(discover_specific_versions "$TARGET_DRIVER_MAJOR_VERSION"))
+if [ ${#VERSION_LIST[@]} -eq 0 ]; then
+    log_error "Klarte ikke å finne noen spesifikke versjoner for $TARGET_DRIVER_MAJOR_VERSION-serien."
+    exit 1
+fi
+
+log_info "Følgende spesifikke versjoner ble funnet for $TARGET_DRIVER_MAJOR_VERSION serien:"
+for i in "${!VERSION_LIST[@]}"; do
+    version_str="${VERSION_LIST[$i]}"
+    core_version=$(extract_core_version "$version_str")
+    # Beste forsøk på å finne CUDA-versjon fra pakkebeskrivelsen
+    cuda_info=$(apt-cache show "nvidia-driver-$TARGET_DRIVER_MAJOR_VERSION=$version_str" 2>/dev/null | grep -i 'cuda' | head -n 1)
+    if [ -n "$cuda_info" ]; then
+        cuda_info="($(echo "$cuda_info" | sed -e 's/^\s*[*]//' -e 's/Description-en: //' -e 's/\s\s*/ /g'))"
+    fi
+    printf "  %d) %s %s\n" "$((i+1))" "$core_version" "$cuda_info"
+done
+
+VERSION_CHOICE=""
+while true; do
+    read -r -p "Vennligst velg en versjon å installere (1-${#VERSION_LIST[@]}): " VERSION_CHOICE
+    if [[ "$VERSION_CHOICE" =~ ^[0-9]+$ ]] && [ "$VERSION_CHOICE" -ge 1 ] && [ "$VERSION_CHOICE" -le ${#VERSION_LIST[@]} ]; then
+        SPECIFIC_TARGET_VERSION="${VERSION_LIST[$((VERSION_CHOICE-1))]}"
+        FINAL_TARGET_VERSION_CORE=$(extract_core_version "$SPECIFIC_TARGET_VERSION")
+        log_info "Du har valgt versjon $FINAL_TARGET_VERSION_CORE for installasjon."
+        break
+    else
+        log_warn "Ugyldig valg. Vennligst skriv inn et tall mellom 1 og ${#VERSION_LIST[@]}."
+    fi
+done
+
+# Nå som en spesifikk versjon er valgt, fortsetter vi med synkroniseringssjekken.
+log_info "Starter NVIDIA driver og bibliotekssynkroniseringssjekk for valgt versjon $FINAL_TARGET_VERSION_CORE."
 
 # ... (Resten av den robuste logikken din) ...
 
@@ -140,13 +207,8 @@ else
     fi
 fi
 
-FINAL_TARGET_VERSION_CORE=""
-if [ -n "$SPECIFIC_TARGET_VERSION" ]; then
-    FINAL_TARGET_VERSION_CORE=$(extract_core_version "$SPECIFIC_TARGET_VERSION")
-    log_info "Målrettet kjerneversjon er spesifisert: $FINAL_TARGET_VERSION_CORE"
-else
-    log_info "Vil prøve å installere/reinstallere nyeste tilgjengelige $TARGET_DRIVER_MAJOR_VERSION pakker."
-fi
+# FINAL_TARGET_VERSION_CORE og SPECIFIC_TARGET_VERSION er nå satt av den interaktive velgeren ovenfor.
+# Den gamle logikken for å bestemme versjonen er ikke lenger nødvendig.
 
 if $SMI_WORKS && [ -n "$CURRENT_DRIVER_VERSION_CORE" ] && [ -n "$INSTALLED_LIB_PKG_VERSION_CORE" ] && \
    [ "$CURRENT_DRIVER_VERSION_CORE" == "$INSTALLED_LIB_PKG_VERSION_CORE" ] && \
@@ -161,7 +223,7 @@ if $SMI_WORKS && [ -n "$CURRENT_DRIVER_VERSION_CORE" ] && [ -n "$INSTALLED_LIB_P
 fi
 
 log_warn "Driver/Bibliotek er enten i mismatch, feil versjon, eller nvidia-smi feiler."
-read -r -p "Vil du prøve å installere/oppgradere til NVIDIA driver og biblioteker for $TARGET_DRIVER_MAJOR_VERSION serien? (Mål: ${FINAL_TARGET_VERSION_CORE:-nyeste tilgjengelige}) (y/N): " choice
+read -r -p "Du har valgt å installere versjon $FINAL_TARGET_VERSION_CORE. Vil du fortsette? (y/N): " choice
 if [[ ! "$choice" =~ ^[Yy]$ ]]; then
     log_info "Fiks avbrutt av bruker."
     exit 1
