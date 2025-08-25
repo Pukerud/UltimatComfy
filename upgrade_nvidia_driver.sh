@@ -170,7 +170,7 @@ fi
 read -r -p "For å unngå konflikter, anbefales det å fjerne alle eksisterende NVIDIA-driverpakker først. Dette kan løse 'unmet dependencies'-feil. Vil du gjøre dette? (Y/n): " purge_choice
 if [[ ! "$purge_choice" =~ ^[Nn]$ ]]; then
     log_info "Fjerner eksisterende NVIDIA-pakker for å unngå konflikter..."
-    if ! apt-get purge -y 'nvidia-*' 'libnvidia-*'; then
+    if ! apt-get purge -y --allow-change-held-packages 'nvidia-*' 'libnvidia-*'; then
         log_error "Klarte ikke å fjerne eksisterende NVIDIA-pakker. Dette kan føre til problemer."
         log_warn "Prøver å fortsette uansett, men installasjonen kan mislykkes."
     else
