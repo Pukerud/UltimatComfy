@@ -6,6 +6,32 @@
 # Assuming they are in the same directory as this script
 # shellcheck source=./common_utils.sh
 source "$(dirname "$0")/common_utils.sh" || { echo "ERROR: common_utils.sh not found or failed to source. Exiting."; exit 1; }
+
+# --- OS Selection ---
+# Since automatic detection can be unreliable, we ask the user directly.
+if [ -z "$USER_SELECTED_OS" ]; then # Check if the variable is already set
+    while true; do
+        echo "Please select your operating system:"
+        echo "1) Windows"
+        echo "2) Linux / macOS"
+        read -r -p "Enter choice [1-2]: " os_choice
+        case $os_choice in
+            1)
+                export USER_SELECTED_OS="windows"
+                break
+                ;;
+            2)
+                export USER_SELECTED_OS="linux"
+                break
+                ;;
+            *)
+                echo "Invalid choice. Please enter 1 or 2."
+                ;;
+        esac
+    done
+fi
+script_log "INFO: User selected OS: $USER_SELECTED_OS"
+
 # shellcheck source=./docker_setup.sh
 source "$(dirname "$0")/docker_setup.sh" || { echo "ERROR: docker_setup.sh not found or failed to source. Exiting."; exit 1; }
 # shellcheck source=./model_downloader.sh

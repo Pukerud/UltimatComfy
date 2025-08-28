@@ -3,18 +3,12 @@
 # --- Globale Innstillinger og Konstanter ---
 # OS Detection
 OS_TYPE="unknown"
-# First, check for the OS environment variable, which is common in Git Bash on Windows.
-if [ -n "$OS" ] && [ "$OS" == "Windows_NT" ]; then
-    OS_TYPE="windows"
-else
-    # Fallback to uname, which is the standard way.
-    case "$(uname -s)" in
-        Linux*)     OS_TYPE="linux";;
-        Darwin*)    OS_TYPE="mac";;
-        CYGWIN*|MINGW*|MSYS*) OS_TYPE="windows";;
-        *)          OS_TYPE="unknown";;
-    esac
-fi
+case "$(uname -s)" in
+    Linux*)     OS_TYPE="linux";;
+    Darwin*)    OS_TYPE="mac";;
+    CYGWIN*|MINGW*|MSYS*) OS_TYPE="windows";;
+    *)          OS_TYPE="unknown";;
+esac
 
 # Farger for logging
 RED='[0;31m'
