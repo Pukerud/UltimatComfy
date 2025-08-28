@@ -273,7 +273,7 @@ Choose an option:" \
                 if ! check_docker_status; then press_enter_to_continue; continue; fi
                 if [[ -z "$DOCKER_SCRIPTS_ACTUAL_PATH" ]]; then initialize_docker_paths; fi
                 if [[ -f "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh" ]]; then
-                    "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+                    bash "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
                 else
                     log_warn "Startskript ikke funnet. Kjør installasjon (valg 1) først."
                 fi
