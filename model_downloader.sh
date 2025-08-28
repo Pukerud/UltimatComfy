@@ -23,7 +23,15 @@ md_check_jq() {
     script_log "DEBUG: ENTERING md_check_jq (model_downloader.sh)"
     if ! command -v jq &> /dev/null; then
         log_error "'jq' er ikke funnet. Dette kreves for modelldenedlasting."
-        log_error "Installer med: sudo apt update && sudo apt install jq"
+        # OS_TYPE is sourced from common_utils.sh in the main script
+        if [[ "$OS_TYPE" == "linux" ]]; then
+            log_error "Installer med: sudo apt update && sudo apt install jq"
+        elif [[ "$OS_TYPE" == "windows" ]]; then
+            log_error "Installer 'jq' for Windows. For eksempel med Chocolatey: choco install jq"
+            log_error "Eller last ned fra: https://jqlang.github.io/jq/download/"
+        else
+            log_error "Vennligst installer 'jq' for ditt operativsystem."
+        fi
         script_log "DEBUG: EXITING md_check_jq (jq not found)"
         return 1
     fi
@@ -89,6 +97,10 @@ md_find_and_select_comfyui_path() {
         fi
     done
     local search_locations=("$HOME" "/mnt" "/opt" "/srv")
+    if [[ "$OS_TYPE" == "windows" ]]; then
+        # Add common drive letters for Windows environments (as seen by Git Bash)
+        search_locations+=("/c/" "/d/")
+    fi
     if [[ -n "${BASE_DOCKER_SETUP_DIR:-}" && -d "$BASE_DOCKER_SETUP_DIR" ]]; then
         search_locations+=("$BASE_DOCKER_SETUP_DIR")
     fi
