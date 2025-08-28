@@ -265,9 +265,14 @@ perform_docker_initial_setup() {
     local docker_data_path_host="$DOCKER_DATA_ACTUAL_PATH"
     if [ "$OS_TYPE" == "windows" ]; then
         log_info "Windows OS detected. Converting paths for Docker volume mounts..."
-        # Convert a path like /c/Users/ to //c/Users/ for Docker on Windows compatibility
-        docker_data_path_host=$(echo "$DOCKER_DATA_ACTUAL_PATH" | sed 's/^\/\([a-zA-Z]\)\//\/\/\1\//')
-        script_log "INFO: Converted DOCKER_DATA_ACTUAL_PATH for Windows: from '$DOCKER_DATA_ACTUAL_PATH' to '$docker_data_path_host'"
+        if command -v cygpath &> /dev/null; then
+            # Use cygpath to convert to a mixed-style path (e.g., C:/Users/...) which is robust for Docker on Windows
+            docker_data_path_host=$(cygpath -m "$DOCKER_DATA_ACTUAL_PATH")
+            script_log "INFO: Converted DOCKER_DATA_ACTUAL_PATH using cygpath: from '$DOCKER_DATA_ACTUAL_PATH' to '$docker_data_path_host'"
+        else
+            log_warn "cygpath utility not found. This may cause issues with volume mounting on Windows."
+            log_warn "Please ensure you are running this from a standard Git Bash terminal."
+        fi
     fi
 
     for i in $(seq 0 $((num_gpus - 1))); do
