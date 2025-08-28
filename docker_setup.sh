@@ -261,6 +261,15 @@ perform_docker_initial_setup() {
     echo "fi" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
 
+    # Path conversion for Windows Docker compatibility
+    local docker_data_path_host="$DOCKER_DATA_ACTUAL_PATH"
+    if [ "$OS_TYPE" == "windows" ]; then
+        log_info "Windows OS detected. Converting paths for Docker volume mounts..."
+        # Convert a path like /c/Users/ to //c/Users/ for Docker on Windows compatibility
+        docker_data_path_host=$(echo "$DOCKER_DATA_ACTUAL_PATH" | sed 's/^\/\([a-zA-Z]\)\//\/\/\1\//')
+        script_log "INFO: Converted DOCKER_DATA_ACTUAL_PATH for Windows: from '$DOCKER_DATA_ACTUAL_PATH' to '$docker_data_path_host'"
+    fi
+
     for i in $(seq 0 $((num_gpus - 1))); do
         container_name="comfyui-gpu${i}"
         host_port=$((8188 + i))
@@ -277,15 +286,15 @@ perform_docker_initial_setup() {
 
         # Add remaining arguments
         echo "CMD+=(\"-p\" \"${host_port}:8188\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/models:/app/ComfyUI/models\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/custom_nodes:/app/ComfyUI/custom_nodes\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$docker_data_path_host/models:/app/ComfyUI/models\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$docker_data_path_host/custom_nodes:/app/ComfyUI/custom_nodes\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "CMD+=(\"-v\" \"comfyui_pip_packages:/opt/venv/lib/python3.10/site-packages/\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/gpu${i}/input:/app/ComfyUI/input\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/gpu${i}/output:/app/ComfyUI/output\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/gpu${i}/temp:/app/ComfyUI/temp\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/huggingface:/cache/huggingface\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/torch:/cache/torch\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/whisperx:/cache/whisperx\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$docker_data_path_host/gpu${i}/input:/app/ComfyUI/input\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$docker_data_path_host/gpu${i}/output:/app/ComfyUI/output\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$docker_data_path_host/gpu${i}/temp:/app/ComfyUI/temp\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$docker_data_path_host/cache/gpu${i}/huggingface:/cache/huggingface\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$docker_data_path_host/cache/gpu${i}/torch:/cache/torch\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$docker_data_path_host/cache/gpu${i}/whisperx:/cache/whisperx\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "CMD+=(\"--restart\" \"unless-stopped\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "CMD+=(\"$COMFYUI_IMAGE_NAME\" \"python3\" \"main.py\" \"--max-upload-size\" \"1000\" \"--listen\" \"0.0.0.0\" \"--port\" \"8188\" \"--preview-method\" \"auto\" \"--cuda-device\" \"0\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
 
