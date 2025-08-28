@@ -34,6 +34,21 @@ initialize_docker_paths
 # --- Lock File Configuration ---
 LOCK_FILE_PATH="/tmp/auto_download_service.sbas.lock"
 
+# Clean up stale lock file if it exists.
+# This is a simple approach. A more robust solution might involve checking the PID
+# of the process that created the lock file. For this service, it's acceptable
+# to assume that if the script is starting, any pre-existing lock is stale.
+if [ -d "$LOCK_FILE_PATH" ]; then
+    log_warn "Stale lock file found at $LOCK_FILE_PATH. Attempting to remove it."
+    if ! rmdir "$LOCK_FILE_PATH"; then
+        # If rmdir fails, it might be because the directory is not empty,
+        # or due to permissions. This could indicate a real running instance.
+        script_log "ERROR: Could not remove stale lock directory $LOCK_FILE_PATH. It might be in use by another process. Exiting."
+        exit 1
+    fi
+    log_info "Stale lock file removed."
+fi
+
 # Attempt to acquire lock
 if mkdir "$LOCK_FILE_PATH"; then
     # log_info should be available now since common_utils and docker_setup are sourced, and paths initialized.
@@ -41,12 +56,11 @@ if mkdir "$LOCK_FILE_PATH"; then
     # Setup trap to remove lock on exit
     trap 'rmdir "$LOCK_FILE_PATH"; log_info "Lock file $LOCK_FILE_PATH removed. Auto download service instance ($(basename $0) PID: $$) stopped."; exit' INT TERM EXIT HUP
 else
-    # Using script_log for consistency if available, otherwise echo to stderr.
-    # The error message should go to stderr.
+    # If mkdir fails now, it's likely a race condition or a persistent issue.
     if command -v script_log &> /dev/null; then
-        script_log "ERROR: Another instance of auto_download_service.sh is already running (lock file $LOCK_FILE_PATH exists). Exiting."
+        script_log "ERROR: Could not acquire lock. Another instance of auto_download_service.sh might have just started. Exiting."
     else
-        echo "ERROR: Another instance of auto_download_service.sh is already running (lock file $LOCK_FILE_PATH exists). Exiting." >&2
+        echo "ERROR: Could not acquire lock. Another instance of auto_download_service.sh might have just started. Exiting." >&2
     fi
     exit 1
 fi
@@ -58,6 +72,39 @@ AUTO_MODELS_PATH="Auto/Models/"
 
 NEEDS_RESTART=false
 PROCESSED_CUSTOM_TXT_PATH="" # Will be initialized in main or after DOCKER_DATA_ACTUAL_PATH is set
+
+# --- Downloader Function ---
+# Tries to use curl, falls back to wget. Logs errors if neither is found.
+# Usage: download_file "URL" "OUTPUT_PATH"
+download_file() {
+    local url="$1"
+    local output_path="$2"
+
+    if command -v curl &>/dev/null; then
+        # Use curl
+        log_info "Using curl to download $url to $output_path"
+        curl -L --fail -o "$output_path" "$url"
+        local exit_code=$?
+        if [ $exit_code -ne 0 ]; then
+            script_log "ERROR: curl failed to download $url. Exit code: $exit_code"
+            return 1
+        fi
+        return 0
+    elif command -v wget &>/dev/null; then
+        # Use wget
+        log_info "Using wget to download $url to $output_path"
+        wget -nv -O "$output_path" "$url"
+        local exit_code=$?
+        if [ $exit_code -ne 0 ]; then
+            script_log "ERROR: wget failed to download $url. Exit code: $exit_code"
+            return 1
+        fi
+        return 0
+    else
+        script_log "CRITICAL: Neither curl nor wget is available. Cannot download files."
+        return 1
+    fi
+}
 
 # Functions
 
@@ -178,11 +225,8 @@ check_for_new_nodes() {
     downloaded_custom_txt=$(mktemp)
 
     log_info "Downloading Custom.txt from $server_custom_txt_url"
-    wget -nv -O "$downloaded_custom_txt" "$server_custom_txt_url"
-    local wget_exit_code=$?
-
-    if [ $wget_exit_code -ne 0 ]; then
-        script_log "ERROR: Failed to download Custom.txt from $server_custom_txt_url. Exit code: $wget_exit_code"
+    if ! download_file "$server_custom_txt_url" "$downloaded_custom_txt"; then
+        script_log "ERROR: Failed to download Custom.txt from $server_custom_txt_url."
         rm -f "$downloaded_custom_txt"
         return
     fi
@@ -357,19 +401,19 @@ download_model() {
 
                 if [ "$should_download" = true ]; then
                     log_info "Downloading: $file_to_download_source_url to $file_to_download_local_path"
-                    wget -nv -O "$file_to_download_local_path" "$file_to_download_source_url"
-                    local wget_exit_code=$?
-                    if [ $wget_exit_code -ne 0 ]; then
-                        script_log "ERROR: wget download failed for $file_to_download_source_url. Exit code: $wget_exit_code."
-                    else
+                    if download_file "$file_to_download_source_url" "$file_to_download_local_path"; then
                         log_info "Successfully downloaded $file_to_download_decoded_name."
                         # NEEDS_RESTART=true # This line is intentionally REMOVED
                         if [ ! -f "$file_to_download_local_path" ] || [ ! -s "$file_to_download_local_path" ]; then
-                            script_log "CRITICAL_ERROR: File $file_to_download_local_path missing or empty after wget success for $file_to_download_decoded_name."
+                            script_log "CRITICAL_ERROR: File $file_to_download_local_path missing or empty after download for $file_to_download_decoded_name."
                         else
                             local dl_size=$(stat -c%s "$file_to_download_local_path")
                             log_info "VERIFIED: File $file_to_download_local_path OK, size $dl_size for $file_to_download_decoded_name."
                         fi
+                    else
+                        script_log "ERROR: Download failed for $file_to_download_source_url."
+                        # Optional: attempt to clean up partially downloaded file
+                        rm -f "$file_to_download_local_path"
                     fi
                 fi
             done
@@ -422,21 +466,21 @@ download_model() {
                 return 1
             fi
 
-            wget -nv -O "$current_local_item_path" "$current_item_source_url"
-            local wget_exit_code=$?
-            if [ $wget_exit_code -ne 0 ]; then
-                script_log "ERROR: wget download failed for $current_item_source_url. Exit code: $wget_exit_code."
-                return 1
-            else
+            if download_file "$current_item_source_url" "$current_local_item_path"; then
                 log_info "Successfully downloaded $decoded_item_name."
                 # NEEDS_RESTART=true # This line is intentionally REMOVED
                 if [ ! -f "$current_local_item_path" ] || [ ! -s "$current_local_item_path" ]; then
-                    script_log "CRITICAL_ERROR: File $current_local_item_path missing or empty after wget success for $decoded_item_name."
+                    script_log "CRITICAL_ERROR: File $current_local_item_path missing or empty after download for $decoded_item_name."
                     return 1
                 else
                     local dl_size=$(stat -c%s "$current_local_item_path")
                     log_info "VERIFIED: File $current_local_item_path OK, size $dl_size for $decoded_item_name."
                 fi
+            else
+                script_log "ERROR: Download failed for $current_item_source_url."
+                # Optional: attempt to clean up partially downloaded file
+                rm -f "$current_local_item_path"
+                return 1
             fi
         fi
         return 0
