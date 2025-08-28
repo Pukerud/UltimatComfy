@@ -270,8 +270,8 @@ perform_docker_initial_setup() {
         # Build the docker command in an array for robustness
         echo "CMD=(\"docker\" \"run\" \"-d\" \"--name\" \"$container_name\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
 
-        # Add GPU args conditionally
-        echo "if [[ \"\$(uname -s)\" == \"Linux\" ]]; then" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        # Add GPU args conditionally, using the more portable `[` test command.
+        echo "if [ \"\$(uname -s)\" = \"Linux\" ]; then" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "  CMD+=(\"--gpus\" \"device=$i\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "fi" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
 
