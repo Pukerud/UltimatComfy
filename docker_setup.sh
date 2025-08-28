@@ -291,6 +291,7 @@ perform_docker_initial_setup() {
 
         # Execute the command
         echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "echo \"DEBUG: Executing command: \${CMD[@]}\" >&2" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "\"\${CMD[@]}\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
 
