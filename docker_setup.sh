@@ -266,7 +266,11 @@ perform_docker_initial_setup() {
         host_port=$((8188 + i))
         echo "echo \"Starter ComfyUI for GPU $i (Container: $container_name) på port $host_port...\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "docker run -d --name \"$container_name\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  --gpus device=$i \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        # On Linux, we specify the GPU device. On Windows, Docker Desktop handles this automatically.
+        # The start script doesn't source common_utils.sh, so we use uname directly.
+        echo "if [[ \"\$(uname -s)\" == \"Linux\" ]]; then" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "  echo \"  --gpus device=$i \\\\\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "fi" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "  -p \"${host_port}:8188\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/models:/app/ComfyUI/models\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/custom_nodes:/app/ComfyUI/custom_nodes\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
@@ -277,9 +281,10 @@ perform_docker_initial_setup() {
         echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/huggingface:/cache/huggingface\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/torch:/cache/torch\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/whisperx:/cache/whisperx\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  --network host \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh" # Keep or remove based on user needs
+        # --network host is not supported on Windows/Mac, so we use port mapping instead.
         echo "  --restart unless-stopped \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  \"$COMFYUI_IMAGE_NAME\" python3 main.py --max-upload-size 1000 --listen 0.0.0.0 --port \"${host_port}\" --preview-method auto --cuda-device 0" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        # The container always listens on 8188. The host port is mapped via the -p flag.
+        echo "  \"$COMFYUI_IMAGE_NAME\" python3 main.py --max-upload-size 1000 --listen 0.0.0.0 --port 8188 --preview-method auto --cuda-device 0" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "echo \"ComfyUI for GPU $i (Container: $container_name) er tilgjengelig på http://localhost:${host_port}\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     done
     chmod +x "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
@@ -366,9 +371,8 @@ install_comfyui_manager_on_host() {
         read -r reinstall_choice
         if [[ "$reinstall_choice" =~ ^[Jj][Aa]$ ]]; then
             log_info "Removing existing ComfyUI-Manager for reinstall..."
-            log_info "Attempting to remove with sudo due to potential permission issues..."
-            if ! sudo rm -rf "$manager_dir"; then
-                log_error "Failed to remove existing ComfyUI-Manager directory. Please check permissions and sudo access."
+            if ! rm -rf "$manager_dir"; then
+                log_error "Failed to remove existing ComfyUI-Manager directory. Please check permissions."
                 script_log "DEBUG: EXITING install_comfyui_manager_on_host (failed to remove old manager dir)"
                 return 1
             fi
@@ -384,15 +388,14 @@ install_comfyui_manager_on_host() {
     fi
 
     if ! command -v git &> /dev/null; then
-        log_warn "git command not found. Attempting to install..."
-        if sudo apt update && sudo apt install -y git; then
-            log_success "git installed successfully."
+        log_warn "git command not found."
+        if [[ "$OS_TYPE" == "linux" ]]; then
+            log_error "Please install git (e.g., 'sudo apt install git') and try again."
         else
-            log_error "Failed to install git. ComfyUI-Manager cloning will likely fail."
-            log_error "Please install git manually and try again."
-            script_log "DEBUG: EXITING install_comfyui_manager_on_host (git install failed)"
-            return 1
+            log_error "Please install Git for Windows and ensure 'git.exe' is in your PATH."
         fi
+        script_log "DEBUG: EXITING install_comfyui_manager_on_host (git not found)"
+        return 1
     fi
 
     if ! mkdir -p "$target_custom_nodes_dir"; then

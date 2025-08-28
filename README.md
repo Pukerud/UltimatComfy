@@ -58,25 +58,37 @@ The `UltimateComfy.sh` setup now includes an automated background service (`auto
 **Server Configuration:**
 -   The service expects new nodes and models to be available on the server configured within the scripts (default: `http://192.168.1.29:8081/`) under the paths `Auto/Nodes/` and `Auto/Models/` respectively.
 
-## `--network host` Modification
+## Networking Configuration (Previously `--network host`)
 
-The `docker run` command used to start the ComfyUI containers has been modified to include the `--network host` option.
+Previous versions of this script used the `--network host` setting for Docker. This has been **removed** to ensure cross-platform compatibility, as it is not supported on Windows or macOS.
 
-**What it does:**
-When `--network host` is used, the Docker container shares the network stack of the host machine. This means the container does not get its own IP address but uses the host's IP address directly. Any ports opened by applications inside the container will be directly accessible on the host machine's IP, without needing explicit port mapping (`-p host_port:container_port`).
+The script now uses standard Docker port mapping (`-p <host_port>:<container_port>`). For example, `-p 8188:8188`.
 
-**Implications:**
--   **Simplified Port Access:** The ComfyUI instance running inside the Docker container will be accessible at `http://localhost:8188` (or `http://<host_ip>:8188`), assuming 8188 is the default ComfyUI port. If multiple instances are run, they will need to listen on different ports within the container to avoid conflicts, as they all share the host's network. The script already handles assigning different host ports for multi-GPU setups by incrementing from 8188 (e.g., 8188, 8189, etc.). With `--network host`, the application inside the container *must* listen on these specific ports (e.g., main.py --port 8189). The current script's `CMD` in the Dockerfile is hardcoded to `python3 main.py --listen 0.0.0.0 --port 8188`. This means for multi-GPU setups with `--network host`, only the first instance (on 8188) will be directly accessible unless the `CMD` is made dynamic or the `docker run` command overrides the `CMD` to pass a different `--port` for each instance. *This is a potential issue to be aware of with the current script structure when using `--network host` for multiple containers.*
--   **Potential Port Conflicts:** Since the container uses the host's network directly, if any service on the host machine (or another container using `--network host`) is already using a port that ComfyUI tries to use, there will be a conflict.
--   **Performance:** May offer slight network performance improvements in some cases by reducing network address translation (NAT) overhead.
--   **Security:** Reduces network isolation between the container and the host. Use with caution, especially in multi-tenant environments or when running untrusted images.
+**Implications of this change:**
+-   **Cross-Platform Support:** The script now works correctly on Linux, Windows (with Docker Desktop), and macOS.
+-   **Improved Security:** Containers have their own isolated network stack, which is more secure than sharing the host's network.
+-   **No Port Conflicts:** The application inside the container always listens on its default port (8188). The script manages mapping this to unique ports on the host machine for multi-GPU setups (e.g., 8188, 8189, etc.), avoiding conflicts.
 
-**Note on Port Mapping (`-p`):**
-The script currently retains the `-p ${host_port}:8188` option in the `docker run` command. When `--network host` is used, explicit port mappings with `-p` are generally ignored or unnecessary. However, their presence shouldn't typically cause issues.
+## Windows Usage
+
+This script is now compatible with Windows. Here are the prerequisites and instructions:
+
+**1. Prerequisites:**
+   - **Git for Windows:** You must install Git for Windows, which includes **Git Bash**. Git Bash is required to run the `.sh` scripts. You can download it from [git-scm.com](https://git-scm.com/).
+   - **Docker Desktop:** You must install Docker Desktop for Windows. It should be configured to use the **WSL 2 backend** (this is the default for most modern installations). You can download it from the [Docker website](https://www.docker.com/products/docker-desktop/).
+   - **(Optional) NVIDIA GPU Support:**
+     - Install the latest **NVIDIA drivers** for your GPU.
+     - In Docker Desktop settings, under **Resources > WSL Integration**, ensure your WSL 2 distribution is enabled. GPU support is typically enabled by default if you have a compatible GPU and drivers.
+   - **(Optional) `jq` for Model Downloader:** To use the model package downloader, you need the `jq` command-line tool. You can install it using a package manager like Chocolatey (`choco install jq`) or by downloading the executable from the [official jq website](https://jqlang.github.io/jq/download/) and adding it to your system's PATH.
+
+**2. Running the Script:**
+   - Instead of running `UltimateComfy.sh` directly, Windows users should use the provided batch file:
+     ```
+     UltimateComfy.bat
+     ```
+   - You can simply double-click this file from the Windows File Explorer. It will automatically launch the script in a Git Bash environment.
 
 ## Getting Started & Usage
-
-This project now consists of multiple script files due to refactoring for better organization. To use `UltimateComfy.sh`, you first need to obtain all the necessary script files.
 
 **1. Download the Scripts:**
 
@@ -84,31 +96,21 @@ This project now consists of multiple script files due to refactoring for better
     ```bash
     git clone https://github.com/Pukerud/UltimatComfy.git
     cd UltimatComfy
+    ```
+
+**2. Run the Script:**
+*   **On Linux:**
+    ```bash
     chmod +x UltimateComfy.sh
     ./UltimateComfy.sh
     ```
-    *(The main `UltimateComfy.sh` script needs to be executable. The other `.sh` files (`common_utils.sh`, `docker_setup.sh`, `model_downloader.sh`) are sourced and do not strictly require execute permissions, but it's harmless to set them.)*
-
-    **For Existing Users (Updating an Existing Clone):**
-    If you have already cloned the repository, you can update to the latest version by navigating into the `UltimatComfy` directory and running `git pull`:
-    ```bash
-    cd UltimatComfy  # Ensure you are in the cloned directory
-    git pull
-    # Then run the script as usual
-    ./UltimateComfy.sh
+*   **On Windows:**
+    Double-click `UltimateComfy.bat` in File Explorer, or run it from a command prompt:
+    ```cmd
+    UltimateComfy.bat
     ```
 
-*   **Alternative Method: Download Archive (Tar.gz)**
-    ```bash
-    curl -sSL -o UltimatComfy.tar.gz https://github.com/Pukerud/UltimatComfy/archive/refs/heads/main.tar.gz
-    tar -xzf UltimatComfy.tar.gz
-    # The extracted directory might be named UltimatComfy-main or similar
-    cd UltimatComfy-main
-    chmod +x UltimateComfy.sh
-    ./UltimateComfy.sh
-    ```
-
-**2. Follow the on-screen menu options:**
+**3. Follow the on-screen menu options:**
     Once the script is running:
     *   **Option 1 (Førstegangs oppsett/Installer ComfyUI i Docker):** This should be your first step if you haven't set up ComfyUI with this script before. It will:
         *   Ask for the number of GPUs.
@@ -120,7 +122,7 @@ This project now consists of multiple script files due to refactoring for better
     *   **Option 3 (Last ned/Administrer Modeller):** Access the model downloader utility.
     *   **Option 4 (Start ComfyUI Docker Container(e)):** Runs the generated `start_comfyui.sh`.
     *   **Option 5 (Stopp ComfyUI Docker Container(e)):** Runs the generated `stop_comfyui.sh`.
-    *   **Option 6 (Avslutt):** Exits the script.
+    *   **Option 12 (Avslutt):** Exits the script.
 
 ## Script Variables and Configuration
 
@@ -131,6 +133,6 @@ The script suite uses several global variables for paths and settings. Core cons
 -   **Docker and NVIDIA Docker:** Ensure Docker is installed and configured correctly to work with NVIDIA GPUs (e.g., `nvidia-container-toolkit` is installed).
 -   **Rootless Docker:** The script uses `docker` commands directly. If you are running Docker in rootless mode, ensure your user has the necessary permissions.
 -   **Model Storage:** Models are stored in the `comfyui_data/models` subdirectory within your `BASE_DOCKER_SETUP_DIR`. Ensure you have sufficient disk space.
--   **Multi-GPU with `--network host`:** As noted in the "Implications" section for `--network host`, the current Dockerfile `CMD` hardcodes the ComfyUI listening port to 8188. For multiple GPU instances to be accessible when using `--network host`, each container would need to be started with a different `--port` argument to `main.py`. The `start_comfyui.sh` script generated by `UltimateComfy.sh` *does* map different host ports (`-p 8188:8188`, `-p 8189:8188`, etc.), but with `--network host`, the internal application port must also change. This means the `-p` option becomes less relevant, and the focus shifts to ensuring the `main.py` command inside each container uses a unique port corresponding to what you expect on the host. The current script does not dynamically adjust the `CMD` for `main.py` for different GPU instances.
+-   **Multi-GPU Setups:** The script correctly handles multi-GPU setups by launching a separate container for each GPU and mapping them to different host ports (e.g., `localhost:8188` for GPU 0, `localhost:8189` for GPU 1, and so on).
 
 This script provides a powerful way to manage ComfyUI, but always review scripts from the internet before running them, especially those that perform system operations like Docker image building and container management.

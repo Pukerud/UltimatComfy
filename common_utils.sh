@@ -1,6 +1,15 @@
 #!/bin/bash
 
 # --- Globale Innstillinger og Konstanter ---
+# OS Detection
+OS_TYPE="unknown"
+case "$(uname -s)" in
+    Linux*)     OS_TYPE="linux";;
+    Darwin*)    OS_TYPE="mac";;
+    CYGWIN*|MINGW*|MSYS*) OS_TYPE="windows";;
+    *)          OS_TYPE="unknown";;
+esac
+
 # Farger for logging
 RED='[0;31m'
 GREEN='[0;32m'
@@ -14,6 +23,7 @@ SCRIPT_LOG_FILE="${SCRIPT_LOG_FILE:-$BASE_DOCKER_SETUP_DIR/ultimate_comfy_debug.
 
 # --- Logging Setup ---
 # Ensure log directory exists
+# On Windows, mkdir -p is available in Git Bash.
 mkdir -p "$(dirname "$SCRIPT_LOG_FILE")"
 
 # Script-wide debug logging function
@@ -30,6 +40,7 @@ script_log() {
 # Initial Log and Exit Trap
 echo "--- Log Start $(date '+%Y-%m-%d %H:%M:%S') ---" > "$SCRIPT_LOG_FILE" # Overwrite for fresh log
 script_log "INFO: common_utils.sh sourced. Logging to $SCRIPT_LOG_FILE"
+script_log "INFO: Detected OS_TYPE: $OS_TYPE"
 script_log "INFO: BASE_DOCKER_SETUP_DIR set to $BASE_DOCKER_SETUP_DIR"
 # The trap will be set by the main script that sources this, to ensure $? reflects the main script's exit.
 # trap 'script_log "INFO: --- Script execution finished with exit status $? ---"' EXIT
@@ -46,6 +57,11 @@ press_enter_to_continue() {
 
 ensure_dialog_installed() {
     script_log "DEBUG: ENTERING ensure_dialog_installed (common_utils.sh)"
+    if [[ "$OS_TYPE" == "windows" ]]; then
+        script_log "INFO: OS is Windows, 'dialog' utility is not applicable. Falling back to basic menu."
+        script_log "DEBUG: EXITING ensure_dialog_installed (status 1)"
+        return 1
+    fi
     if command -v dialog &>/dev/null; then
         script_log "DEBUG: 'dialog' is available."
         script_log "DEBUG: EXITING ensure_dialog_installed (status 0)"
@@ -83,6 +99,12 @@ ensure_dialog_installed() {
 
 ensure_docker_dns() {
     script_log "DEBUG: ENTERING ensure_docker_dns (common_utils.sh)"
+    if [[ "$OS_TYPE" == "windows" ]]; then
+        script_log "INFO: OS is Windows, Docker Desktop manages DNS settings. Skipping check."
+        script_log "DEBUG: EXITING ensure_docker_dns (no action taken on Windows)"
+        return 0
+    fi
+
     local DAEMON_JSON_FILE="/etc/docker/daemon.json"
 
     # If DNS is already configured, we don't need to do anything.
