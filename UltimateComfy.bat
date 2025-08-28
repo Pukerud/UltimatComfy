@@ -15,15 +15,17 @@ if exist "%ProgramFiles%\Git\bin\bash.exe" set "GIT_BASH_PATH=%ProgramFiles%\Git
 if exist "%ProgramFiles(x86)%\Git\bin\bash.exe" set "GIT_BASH_PATH=%ProgramFiles(x86)%\Git\bin\bash.exe"
 if exist "%LOCALAPPDATA%\Programs\Git\bin\bash.exe" set "GIT_BASH_PATH=%LOCALAPPDATA%\Programs\Git\bin\bash.exe"
 
-if not defined GIT_BASH_PATH (
-    echo.
-    echo ERROR: Git Bash (bash.exe) not found in common locations.
-    echo Please install Git for Windows and ensure it's in your PATH or installed in the default directory.
-    echo You can also run this script from a Git Bash terminal directly.
-    pause
-    exit /b 1
-)
+if defined GIT_BASH_PATH goto :found_bash
 
+:: This block runs if bash.exe was not found.
+echo.
+echo ERROR: Git Bash (bash.exe) not found in common locations.
+echo Please install Git for Windows and ensure it's in your PATH or installed in the default directory.
+echo You can also run this script from a Git Bash terminal directly.
+pause
+exit /b 1
+
+:found_bash
 echo Found Git Bash at: %GIT_BASH_PATH%
 echo Launching UltimateComfy.sh...
 echo.
