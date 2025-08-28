@@ -264,28 +264,38 @@ perform_docker_initial_setup() {
     for i in $(seq 0 $((num_gpus - 1))); do
         container_name="comfyui-gpu${i}"
         host_port=$((8188 + i))
+
         echo "echo \"Starter ComfyUI for GPU $i (Container: $container_name) på port $host_port...\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "docker run -d --name \"$container_name\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        # On Linux, we specify the GPU device. On Windows, Docker Desktop handles this automatically.
-        # The start script doesn't source common_utils.sh, so we use uname directly.
+
+        # Build the docker command in an array for robustness
+        echo "CMD=(\"docker\" \"run\" \"-d\" \"--name\" \"$container_name\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+
+        # Add GPU args conditionally
         echo "if [[ \"\$(uname -s)\" == \"Linux\" ]]; then" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  echo \"  --gpus device=$i \\\\\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "  CMD+=(\"--gpus\" \"device=$i\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "fi" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  -p \"${host_port}:8188\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/models:/app/ComfyUI/models\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/custom_nodes:/app/ComfyUI/custom_nodes\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  -v comfyui_pip_packages:/opt/venv/lib/python3.10/site-packages/ \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/gpu${i}/input:/app/ComfyUI/input\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/gpu${i}/output:/app/ComfyUI/output\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/gpu${i}/temp:/app/ComfyUI/temp\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/huggingface:/cache/huggingface\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/torch:/cache/torch\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  -v \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/whisperx:/cache/whisperx\" \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        # --network host is not supported on Windows/Mac, so we use port mapping instead.
-        echo "  --restart unless-stopped \\" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        # The container always listens on 8188. The host port is mapped via the -p flag.
-        echo "  \"$COMFYUI_IMAGE_NAME\" python3 main.py --max-upload-size 1000 --listen 0.0.0.0 --port 8188 --preview-method auto --cuda-device 0" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+
+        # Add remaining arguments
+        echo "CMD+=(\"-p\" \"${host_port}:8188\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/models:/app/ComfyUI/models\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/custom_nodes:/app/ComfyUI/custom_nodes\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"comfyui_pip_packages:/opt/venv/lib/python3.10/site-packages/\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/gpu${i}/input:/app/ComfyUI/input\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/gpu${i}/output:/app/ComfyUI/output\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/gpu${i}/temp:/app/ComfyUI/temp\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/huggingface:/cache/huggingface\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/torch:/cache/torch\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"-v\" \"$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/whisperx:/cache/whisperx\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"--restart\" \"unless-stopped\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "CMD+=(\"$COMFYUI_IMAGE_NAME\" \"python3\" \"main.py\" \"--max-upload-size\" \"1000\" \"--listen\" \"0.0.0.0\" \"--port\" \"8188\" \"--preview-method\" \"auto\" \"--cuda-device\" \"0\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+
+        # Execute the command
+        echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "\"\${CMD[@]}\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+
         echo "echo \"ComfyUI for GPU $i (Container: $container_name) er tilgjengelig på http://localhost:${host_port}\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh" # Add a newline for readability between containers
     done
     chmod +x "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     log_success "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh generert."
