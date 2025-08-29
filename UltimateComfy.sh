@@ -185,6 +185,78 @@ view_autodownload_log() {
     echo "--- Loggvisning avsluttet ---"
 }
 
+toggle_autodownloader() {
+    log_info "Checking status of auto-downloader..."
+    if [[ -z "$DOCKER_SCRIPTS_ACTUAL_PATH" ]]; then
+        initialize_docker_paths
+    fi
+
+    local start_script="$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+    local stop_script="$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"
+
+    if [ ! -f "$start_script" ] || [ ! -f "$stop_script" ]; then
+        log_error "Start or stop script not found. Cannot toggle auto-downloader."
+        press_enter_to_continue
+        return
+    fi
+
+    local is_enabled
+    if grep -qE '^[[:space:]]*#.*nohup.*auto_download_service.sh' "$start_script"; then
+        is_enabled=false
+        log_info "Auto-downloader is currently DISABLED."
+    else
+        is_enabled=true
+        log_info "Auto-downloader is currently ENABLED."
+    fi
+
+    local action
+    local confirm_choice
+    if [ "$is_enabled" = true ]; then
+        action="disable"
+        echo -n "Do you want to DISABLE the auto-downloader? (yes/no): " >&2
+    else
+        action="enable"
+        echo -n "Do you want to ENABLE the auto-downloader? (yes/no): " >&2
+    fi
+    read -r confirm_choice
+    if [[ ! "$confirm_choice" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+        log_info "Operation cancelled by user."
+        press_enter_to_continue
+        return
+    fi
+
+    log_info "Stopping ComfyUI containers..."
+    if ! check_docker_status; then press_enter_to_continue; return; fi
+    "$stop_script"
+    log_success "ComfyUI containers stopped."
+
+    log_info "Modifying scripts to $action the auto-downloader..."
+    if [ "$action" = "disable" ]; then
+        sed -i.bak -E 's/^( *nohup.*auto_download_service.sh.*)/#\1/' "$start_script"
+        sed -i.bak -E '/^# Auto-downloader service management/,/^fi/s/^/#/' "$stop_script"
+    else
+        sed -i.bak -E 's/^#( *nohup.*auto_download_service.sh.*)/\1/' "$start_script"
+        sed -i.bak -E '/^## Auto-downloader service management/,/^#fi/s/^#//' "$stop_script"
+    fi
+
+    if [ $? -eq 0 ]; then
+        log_success "Scripts modified successfully."
+        rm "${start_script}.bak" "${stop_script}.bak"
+    else
+        log_error "Failed to modify scripts."
+        [ -f "${start_script}.bak" ] && mv "${start_script}.bak" "$start_script"
+        [ -f "${stop_script}.bak" ] && mv "${stop_script}.bak" "$stop_script"
+        press_enter_to_continue
+        return
+    fi
+
+    log_info "Restarting ComfyUI containers..."
+    if ! check_docker_status; then press_enter_to_continue; return; fi
+    bash "$start_script"
+    log_success "ComfyUI restarted."
+    press_enter_to_continue
+}
+
 # --- Hovedmeny Funksjon ---
 main_menu() {
     # Ensure paths are initialized once for the menu context if needed for display or passing.
@@ -227,14 +299,15 @@ Choose an option:" \
                 "9" "Se Auto-Download Service Logg" \
                 "10" "Update Frontend" \
                 "11" "Installer og kjør ncdu" \
-                "12" "Avslutt" \
+                "12" "Toggle Auto-Downloader (Enable/Disable)" \
+                "13" "Avslutt" \
                 2>/dev/tty)
 
             local dialog_exit_status=$?
             script_log "DEBUG: dialog command finished. main_choice='$main_choice', dialog_exit_status='$dialog_exit_status'"
             if [ $dialog_exit_status -ne 0 ]; then
-                main_choice="12" # Updated for new Avslutt number
-                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 12."
+                main_choice="13" # Updated for new Avslutt number
+                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 13."
             fi
         else
             script_log "DEBUG: Using basic menu fallback."
@@ -255,9 +328,10 @@ Choose an option:" \
             echo "9) Se Auto-Download Service Logg"
             echo "10) Update Frontend"
             echo "11) Installer og kjør ncdu"
-            echo "12) Avslutt"
+            echo "12) Toggle Auto-Downloader (Enable/Disable)"
+            echo "13) Avslutt"
             echo "--------------------------------"
-            echo -n "Velg et alternativ (1-12): " >&2
+            echo -n "Velg et alternativ (1-13): " >&2
             read -r main_choice </dev/tty
             script_log "DEBUG: Basic menu read finished. main_choice='$main_choice'"
         fi
@@ -383,7 +457,11 @@ Choose an option:" \
                 press_enter_to_continue
                 ;;
             "12")
-                script_log "DEBUG: main_menu attempting to exit (Option 12)."
+                script_log "INFO: User selected 'Toggle Auto-Downloader'."
+                toggle_autodownloader
+                ;;
+            "13")
+                script_log "DEBUG: main_menu attempting to exit (Option 13)."
                 log_info "Avslutter." # from common_utils.sh
                 clear
                 exit 0
@@ -393,7 +471,7 @@ Choose an option:" \
                     # dialog is from common_utils.sh (via ensure_dialog_installed)
                     dialog --title "Ugyldig valg" --msgbox "Vennligst velg et gyldig alternativ fra menyen." 6 50 2>/dev/tty
                 else
-                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-12." # from common_utils.sh
+                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-13." # from common_utils.sh
                 fi
                 press_enter_to_continue # from common_utils.sh
                 ;;
