@@ -186,73 +186,58 @@ view_autodownload_log() {
 }
 
 toggle_autodownloader() {
+    local script_path="auto_download_service.sh"
     log_info "Checking status of auto-downloader..."
-    if [[ -z "$DOCKER_SCRIPTS_ACTUAL_PATH" ]]; then
-        initialize_docker_paths
-    fi
-
-    local start_script="$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-    local stop_script="$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"
-
-    if [ ! -f "$start_script" ] || [ ! -f "$stop_script" ]; then
-        log_error "Start or stop script not found. Cannot toggle auto-downloader."
-        press_enter_to_continue
-        return
-    fi
 
     local is_enabled
-    if grep -qE '^[[:space:]]*#.*nohup.*auto_download_service.sh' "$start_script"; then
-        is_enabled=false
-        log_info "Auto-downloader is currently DISABLED."
-    else
+    if [ -x "$script_path" ]; then
         is_enabled=true
-        log_info "Auto-downloader is currently ENABLED."
+        log_info "Auto-downloader is currently ENABLED (executable)."
+    else
+        is_enabled=false
+        log_info "Auto-downloader is currently DISABLED (not executable)."
     fi
 
     local action
-    local confirm_choice
     if [ "$is_enabled" = true ]; then
         action="disable"
-        echo -n "Do you want to DISABLE the auto-downloader? (yes/no): " >&2
     else
         action="enable"
-        echo -n "Do you want to ENABLE the auto-downloader? (yes/no): " >&2
     fi
+
+    local confirm_choice
+    echo -n "Do you want to ${action^^} the auto-downloader? (yes/no): " >&2
     read -r confirm_choice
     if [[ ! "$confirm_choice" =~ ^[Yy]([Ee][Ss])?$ ]]; then
-        log_info "Operation cancelled by user."
+        log_info "Operation cancelled."
         press_enter_to_continue
         return
     fi
 
-    log_info "Stopping ComfyUI containers..."
-    if ! check_docker_status; then press_enter_to_continue; return; fi
-    "$stop_script"
-    log_success "ComfyUI containers stopped."
+    log_info "Stopping ComfyUI containers to apply changes..."
+    if [[ -z "$DOCKER_SCRIPTS_ACTUAL_PATH" ]]; then initialize_docker_paths; fi
+    local stop_script="$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"
+    if [ -f "$stop_script" ]; then "$stop_script"; else log_warn "Stop script not found."; fi
 
-    log_info "Modifying scripts to $action the auto-downloader..."
+    log_info "Applying changes..."
     if [ "$action" = "disable" ]; then
-        sed -i.bak -E 's/^( *nohup.*auto_download_service.sh.*)/#\1/' "$start_script"
-        sed -i.bak -E '/^# Auto-downloader service management/,/^fi/s/^/#/' "$stop_script"
+        chmod -x "$script_path"
     else
-        sed -i.bak -E 's/^#( *nohup.*auto_download_service.sh.*)/\1/' "$start_script"
-        sed -i.bak -E '/^## Auto-downloader service management/,/^#fi/s/^#//' "$stop_script"
+        chmod +x "$script_path"
     fi
 
     if [ $? -eq 0 ]; then
-        log_success "Scripts modified successfully."
-        rm "${start_script}.bak" "${stop_script}.bak"
+        log_success "Auto-downloader successfully ${action}d."
     else
-        log_error "Failed to modify scripts."
-        [ -f "${start_script}.bak" ] && mv "${start_script}.bak" "$start_script"
-        [ -f "${stop_script}.bak" ] && mv "${stop_script}.bak" "$stop_script"
+        log_error "Failed to change permissions on $script_path."
         press_enter_to_continue
         return
     fi
 
     log_info "Restarting ComfyUI containers..."
-    if ! check_docker_status; then press_enter_to_continue; return; fi
-    bash "$start_script"
+    local start_script="$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+    if [ -f "$start_script" ]; then bash "$start_script"; else log_warn "Start script not found."; fi
+
     log_success "ComfyUI restarted."
     press_enter_to_continue
 }
@@ -299,7 +284,7 @@ Choose an option:" \
                 "9" "Se Auto-Download Service Logg" \
                 "10" "Update Frontend" \
                 "11" "Installer og kjør ncdu" \
-                "12" "Toggle Auto-Downloader (Enable/Disable)" \
+                "12" "Toggle Auto-Downloader" \
                 "13" "Avslutt" \
                 2>/dev/tty)
 
@@ -328,7 +313,7 @@ Choose an option:" \
             echo "9) Se Auto-Download Service Logg"
             echo "10) Update Frontend"
             echo "11) Installer og kjør ncdu"
-            echo "12) Toggle Auto-Downloader (Enable/Disable)"
+            echo "12) Toggle Auto-Downloader"
             echo "13) Avslutt"
             echo "--------------------------------"
             echo -n "Velg et alternativ (1-13): " >&2
