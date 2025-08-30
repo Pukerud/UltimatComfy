@@ -280,38 +280,38 @@ perform_docker_initial_setup() {
         container_name="comfyui-gpu${i}"
         host_port=$((8188 + i))
 
-        echo "echo \"Starter ComfyUI for GPU $i (Container: $container_name) på port $host_port...\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-
-        # Build the docker command in an array for robustness
-        echo "CMD=(\"docker\" \"run\" \"-d\" \"--name\" \"$container_name\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-
-        # Add GPU args conditionally. Docker on Mac does not support --gpus.
-        echo "if [ \"\$(uname -s)\" != \"Darwin\" ]; then" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "  CMD+=(\"--gpus\" \"device=$i\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        # Generate start logic with check for existing container
+        echo "echo \"Processing ComfyUI for GPU $i (Container: $container_name) on port $host_port...\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "if [ \"\$(docker ps -a -q -f name=^/$container_name\$)\" ]; then" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    if [ \"\$(docker ps -q -f name=^/$container_name\$)\" ]; then" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "        echo \"Container $container_name is already running.\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    else" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "        echo \"Container $container_name exists, starting it...\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "        docker start \"$container_name\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    fi" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "else" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    echo \"Container $container_name not found, creating and starting it...\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD=(\"docker\" \"run\" \"-d\" \"--name\" \"$container_name\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    if [ \"\$(uname -s)\" != \"Darwin\" ]; then" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "      CMD+=(\"--gpus\" \"device=$i\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    fi" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"-p\" \"${host_port}:8188\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"-v\" \"$docker_data_path_host/models:/app/ComfyUI/models\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"-v\" \"$docker_data_path_host/custom_nodes:/app/ComfyUI/custom_nodes\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"-v\" \"comfyui_pip_packages:/opt/venv/lib/python3.10/site-packages/\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"-v\" \"$docker_data_path_host/gpu${i}/input:/app/ComfyUI/input\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"-v\" \"$docker_data_path_host/gpu${i}/output:/app/ComfyUI/output\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"-v\" \"$docker_data_path_host/gpu${i}/temp:/app/ComfyUI/temp\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"-v\" \"$docker_data_path_host/cache/gpu${i}/huggingface:/cache/huggingface\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"-v\" \"$docker_data_path_host/cache/gpu${i}/torch:/cache/torch\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"-v\" \"$docker_data_path_host/cache/gpu${i}/whisperx:/cache/whisperx\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"--restart\" \"unless-stopped\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    CMD+=(\"$COMFYUI_IMAGE_NAME\" \"python3\" \"main.py\" \"--max-upload-size\" \"1000\" \"--listen\" \"0.0.0.0\" \"--port\" \"8188\" \"--preview-method\" \"auto\" \"--cuda-device\" \"0\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    echo \"DEBUG: Executing command: \${CMD[@]}\" >&2" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+        echo "    \"\${CMD[@]}\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "fi" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-
-        # Add remaining arguments
-        echo "CMD+=(\"-p\" \"${host_port}:8188\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$docker_data_path_host/models:/app/ComfyUI/models\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$docker_data_path_host/custom_nodes:/app/ComfyUI/custom_nodes\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"comfyui_pip_packages:/opt/venv/lib/python3.10/site-packages/\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$docker_data_path_host/gpu${i}/input:/app/ComfyUI/input\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$docker_data_path_host/gpu${i}/output:/app/ComfyUI/output\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$docker_data_path_host/gpu${i}/temp:/app/ComfyUI/temp\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$docker_data_path_host/cache/gpu${i}/huggingface:/cache/huggingface\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$docker_data_path_host/cache/gpu${i}/torch:/cache/torch\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"-v\" \"$docker_data_path_host/cache/gpu${i}/whisperx:/cache/whisperx\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"--restart\" \"unless-stopped\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "CMD+=(\"$COMFYUI_IMAGE_NAME\" \"python3\" \"main.py\" \"--max-upload-size\" \"1000\" \"--listen\" \"0.0.0.0\" \"--port\" \"8188\" \"--preview-method\" \"auto\" \"--cuda-device\" \"0\")" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-
-        # Execute the command
+        echo "echo \"ComfyUI for GPU $i (Container: $container_name) is available at http://localhost:${host_port}\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
         echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "echo \"DEBUG: Executing command: \${CMD[@]}\" >&2" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "\"\${CMD[@]}\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-
-        echo "echo \"ComfyUI for GPU $i (Container: $container_name) er tilgjengelig på http://localhost:${host_port}\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-        echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh" # Add a newline for readability between containers
     done
     chmod +x "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     log_success "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh generert."
