@@ -342,9 +342,8 @@ perform_docker_initial_setup() {
 
     for i in $(seq 0 $((num_gpus - 1))); do
         container_name="comfyui-gpu${i}"
-        echo "echo \"Stopper og fjerner container $container_name...\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"
+        echo "echo \"Stopper container $container_name...\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"
         echo "docker stop \"$container_name\" >/dev/null 2>&1 || echo \"Container $container_name var ikke startet.\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"
-        echo "docker rm \"$container_name\" >/dev/null 2>&1 || echo \"Container $container_name fantes ikke.\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"
     done
     chmod +x "$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh"
     log_success "$DOCKER_SCRIPTS_ACTUAL_PATH/stop_comfyui.sh generert."
