@@ -8,7 +8,7 @@ source "$(dirname "$0")/common_utils.sh" || { echo "ERROR: common_utils.sh not f
 script_log "INFO: model_downloader.sh sourced."
 
 # --- Model Downloader (MD) Specific Globals & Constants ---
-MD_SERVER_BASE_URL="http://192.168.1.29:8081/Auto/" # Example, can be overridden by main script if needed
+MD_SERVER_BASE_URL="http://192.168.1.29:8081/Auto/Models/" # Example, can be overridden by main script if needed
 MD_PACKAGES_JSON_URL="http://192.168.1.29:8081/packages.json" # Example
 MD_DEFAULT_COMFYUI_PATH_FALLBACK="$HOME/comfyui_docker_data" # Example
 MD_ADDITIONAL_COMFYUI_PATHS_FALLBACK=("/home/octa/AI/ComfyUI/") # Example
