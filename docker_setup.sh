@@ -242,18 +242,17 @@ perform_docker_initial_setup() {
     echo "# Auto-downloader service management" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "auto_downloader_script_path=\"$project_root_dir/auto_download_service.sh\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "pid_file_path=\"\$(dirname \"\$0\")/auto_download_service.pid\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-    # Get BASE_DOCKER_SETUP_DIR from environment, should be exported by common_utils.sh from the parent execution
-    echo "base_docker_setup_dir_for_log=\"\$BASE_DOCKER_SETUP_DIR\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+    # Hardcode the BASE_DOCKER_SETUP_DIR value at the time of script generation.
+    # This ensures the auto_download_service.sh script knows where to log, even when run via nohup.
+    echo "export BASE_DOCKER_SETUP_DIR=\"$BASE_DOCKER_SETUP_DIR\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "if [ -f \"\$auto_downloader_script_path\" ]; then" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "    echo \"Starting auto-download service...\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-    echo "    if [ -z \"\$base_docker_setup_dir_for_log\" ]; then" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-    echo "        echo 'WARN: BASE_DOCKER_SETUP_DIR not found in environment. Logging auto-downloader to /tmp/auto_download_service.log'" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-    echo "        log_file=\"/tmp/auto_download_service.log\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-    echo "    else" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-    echo "        log_file=\"\${base_docker_setup_dir_for_log}/auto_download_service.log\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
-    echo "    fi" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+    # The log file path is determined by the service script from the exported variable.
+    # We define it here as well just for the startup message.
+    echo "    log_file=\"\$BASE_DOCKER_SETUP_DIR/auto_download_service.log\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "    mkdir -p \"\$(dirname \"\$log_file\")\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
+    # The `export` above makes the variable available to child processes, including the one started by nohup.
     echo "    nohup \"\$auto_downloader_script_path\" >> \"\$log_file\" 2>&1 & echo \$! > \"\$pid_file_path\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "    echo \"Auto-download service started with PID \$(cat \$pid_file_path). Log: \$log_file\"" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
     echo "else" >> "$DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh"
