@@ -322,6 +322,21 @@ clean_comfyui_folders() {
         return
     fi
 
+    # Set permissions to avoid issues before cleaning
+    log_info "Attempting to set write permissions for all users on $data_dir..."
+    if sudo chmod -R a+w "$data_dir"; then
+        log_success "Permissions updated successfully."
+    else
+        log_error "Failed to update permissions. The cleanup might fail."
+        # Ask user if they want to continue despite the failure
+        local continue_choice
+        read -r -p "Do you want to attempt to continue the cleanup anyway? (yes/no): " continue_choice </dev/tty
+        if [[ ! "$continue_choice" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+            log_info "Cleanup operation cancelled by user."
+            return
+        fi
+    fi
+
     # Find all gpu* directories and build a list of paths to clean
     local paths_to_clean=()
     local gpu_dirs
