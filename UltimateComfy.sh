@@ -276,23 +276,34 @@ update_folder_sizes() {
         local output_path="$dir/output"
 
         if [ -d "$input_path" ]; then
-            # du -s returns size in KB blocks.
+            # Use du -sk to get size reliably in kilobytes.
             local current_input_kb
-            current_input_kb=$(du -s "$input_path" | awk '{print $1}')
+            current_input_kb=$(du -sk "$input_path" | awk '{print $1}')
             total_input_kb=$((total_input_kb + current_input_kb))
         fi
 
-        if [ -d "$output_path" ];
-        then
+        if [ -d "$output_path" ]; then
             local current_output_kb
-            current_output_kb=$(du -s "$output_path" | awk '{print $1}')
+            current_output_kb=$(du -sk "$output_path" | awk '{print $1}')
             total_output_kb=$((total_output_kb + current_output_kb))
         fi
     done
 
-    # Convert KB to human-readable format
-    INPUT_SIZE_DISPLAY=$(numfmt --to=iec-i --suffix=B --format="%.1f" "$total_input_kb" | sed 's/\.0B$/B/')
-    OUTPUT_SIZE_DISPLAY=$(numfmt --to=iec-i --suffix=B --format="%.1f" "$total_output_kb" | sed 's/\.0B$/B/')
+    # Check if numfmt is available for human-readable formatting
+    if command -v numfmt &>/dev/null; then
+        # Convert total KB to bytes for numfmt for accurate conversion
+        local total_input_bytes=$((total_input_kb * 1024))
+        local total_output_bytes=$((total_output_kb * 1024))
+
+        # Convert Bytes to human-readable format (e.g., 1.0M, 512K, 1.2G)
+        INPUT_SIZE_DISPLAY=$(numfmt --to=iec-i --suffix=B --format="%.1f" "$total_input_bytes" | sed 's/\.0\([A-Z]\)/\1/')
+        OUTPUT_SIZE_DISPLAY=$(numfmt --to=iec-i --suffix=B --format="%.1f" "$total_output_bytes" | sed 's/\.0\([A-Z]\)/\1/')
+    else
+        # Fallback if numfmt is not available
+        INPUT_SIZE_DISPLAY="${total_input_kb}K"
+        OUTPUT_SIZE_DISPLAY="${total_output_kb}K"
+        script_log "WARN: numfmt not found. Displaying size in kilobytes."
+    fi
 
     script_log "INFO: Calculated sizes -> Input: $INPUT_SIZE_DISPLAY, Output: $OUTPUT_SIZE_DISPLAY"
 }
