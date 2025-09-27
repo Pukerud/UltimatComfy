@@ -446,7 +446,7 @@ Choose an option:" \
         fi
 
         script_log "DEBUG: main_menu case: main_choice='$main_choice'"
-        set +e 
+        set +e
         case "$main_choice" in
             "1")
                 # perform_docker_initial_setup is from docker_setup.sh
@@ -600,4 +600,3 @@ script_log "INFO: --- UltimateComfy.sh (Refactored) startpunkt ---"
 # log_info "Starter ComfyUI Unified Tool (v4 Refactored)..." # This kind of message is now in common_utils.sh or can be added if a distinct one is needed
 
 main_menu
-script_log "DEBUG: main_menu call finished (UltimateComfy.sh should have exited from within main_menu)."
