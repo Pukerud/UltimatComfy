@@ -65,13 +65,62 @@ else
     exit 1
 fi
 
+# Script Version
+SCRIPT_VERSION="1.0"
+
 # Server configuration
 SERVER_BASE_URL="http://192.168.1.29:8081/"
+SERVER_SCRIPTS_PATH="Auto/Scripts/"
 AUTO_NODES_PATH="Auto/Nodes/" # Used for Custom.txt, actual nodes are cloned from git repos
 AUTO_MODELS_PATH="Auto/Models/"
 
 NEEDS_RESTART=false
 PROCESSED_CUSTOM_TXT_PATH="" # Will be initialized in main or after DOCKER_DATA_ACTUAL_PATH is set
+
+# --- Self-update Function ---
+check_for_self_update() {
+    log_info "Checking for script updates..."
+    local server_script_url="$SERVER_BASE_URL$SERVER_SCRIPTS_PATH$(basename "$0")"
+    local temp_script_path
+    temp_script_path=$(mktemp)
+
+    if ! download_file "$server_script_url" "$temp_script_path"; then
+        script_log "ERROR: Could not download latest script version from $server_script_url for update check."
+        rm -f "$temp_script_path"
+        return
+    fi
+
+    local server_version
+    server_version=$(grep '^SCRIPT_VERSION=' "$temp_script_path" | cut -d'=' -f2 | tr -d '"')
+
+    if [ -z "$server_version" ]; then
+        script_log "WARN: Could not determine SCRIPT_VERSION from downloaded script at $server_script_url."
+        rm -f "$temp_script_path"
+        return
+    fi
+
+    log_info "Current script version: $SCRIPT_VERSION. Server script version: $server_version."
+
+    # Simple version comparison.
+    if [ "$(printf '%s\n' "$server_version" "$SCRIPT_VERSION" | sort -V | head -n1)" = "$SCRIPT_VERSION" ] && [ "$server_version" != "$SCRIPT_VERSION" ]; then
+        log_info "New version available ($server_version). Updating script."
+        chmod +x "$temp_script_path"
+        log_info "Executing new script version and restarting service..."
+        rmdir "$LOCK_FILE_PATH"
+        if mv "$temp_script_path" "$0"; then
+            log_info "Script file updated. Restarting with exec..."
+            exec "$0" "$@"
+            script_log "CRITICAL: exec failed to restart the script after update. Exiting."
+            exit 1
+        else
+            script_log "ERROR: Failed to move new script into place. Update aborted."
+            exit 1
+        fi
+    else
+        log_info "Script is up to date."
+        rm -f "$temp_script_path"
+    fi
+}
 
 # --- Downloader Function ---
 # Tries to use curl, falls back to wget. Logs errors if neither is found.
@@ -105,6 +154,31 @@ download_file() {
         return 1
     fi
 }
+
+# --- Permissions Function ---
+set_model_permissions() {
+    local model_path="$DOCKER_DATA_ACTUAL_PATH/models/"
+    log_info "Attempting to set permissions for models directory: $model_path"
+    if [ -d "$model_path" ]; then
+        # The script is likely run as root from systemd, but sudo is safer if run manually
+        if command -v sudo &>/dev/null; then
+            if sudo chmod -R a+w "$model_path"; then
+                log_info "Permissions (a+w) set successfully for $model_path"
+            else
+                script_log "ERROR: Failed to set permissions for $model_path using sudo."
+            fi
+        else
+            if chmod -R a+w "$model_path"; then
+                 log_info "Permissions (a+w) set successfully for $model_path (without sudo)."
+            else
+                script_log "ERROR: Failed to set permissions for $model_path. Sudo not found."
+            fi
+        fi
+    else
+        script_log "WARN: Models directory $model_path does not exist. Skipping permission setting."
+    fi
+}
+
 
 # Functions
 
@@ -287,204 +361,136 @@ check_for_new_nodes() {
     log_info "Finished checking for new nodes from Custom.txt."
 }
 
-check_for_new_models() {
-    log_info "Checking for new models on the server..."
-    local models_url="$SERVER_BASE_URL$AUTO_MODELS_PATH"
+# --- Model Sync Functions ---
 
-    local server_model_items_raw
-    server_model_items_raw=$(curl -sL "$models_url" | grep -o '<a href="[^"]*"' | sed 's/<a href="//;s/"//' | grep -v '^\.\./$' | grep -v '^Parent directory')
+# Global array to hold the list of files found on the server
+SERVER_FILES_LIST=()
 
-    if [ $? -ne 0 ]; then # Check curl exit status
-        script_log "ERROR: Failed to retrieve model list from server at $models_url."
+# Recursively process a directory on the model server
+process_model_directory_recursively() {
+    local relative_dir_path="$1" # e.g., "checkpoints/" or "" for root
+    local full_server_url="$SERVER_BASE_URL$AUTO_MODELS_PATH$relative_dir_path"
+    local local_dir_path="$DOCKER_DATA_ACTUAL_PATH/models/$relative_dir_path"
+
+    log_info "Processing server directory: $full_server_url"
+    mkdir -p "$local_dir_path"
+
+    # Get directory listing from server
+    local server_items_raw
+    server_items_raw=$(curl -sL "$full_server_url" | grep -o '<a href="[^"]*"' | sed 's/<a href="//;s/"//' | grep -v '^\.\./$' | grep -v '^Parent directory')
+    if [ $? -ne 0 ]; then
+        script_log "ERROR: Failed to retrieve item list from server directory: $full_server_url"
         return
     fi
 
-    if [ -z "$server_model_items_raw" ]; then
-        log_info "No model items found on the server at $models_url."
-        return
-    fi
+    mapfile -t server_items < <(echo "$server_items_raw")
 
-    mapfile -t server_model_items < <(echo "$server_model_items_raw")
+    for item_encoded in "${server_items[@]}"; do
+        local item_decoded
+        item_decoded=$(printf '%b' "${item_encoded//%/\x}")
 
-    local local_models_base_path="$DOCKER_DATA_ACTUAL_PATH/models/"
-    if [ ! -d "$local_models_base_path" ]; then
-        log_info "Local models directory does not exist. Creating: $local_models_base_path"
-        mkdir -p "$local_models_base_path"
-        if [ $? -ne 0 ]; then
-            script_log "ERROR: Failed to create local models directory: $local_models_base_path"
-            return
-        fi
-    fi
+        local server_item_relative_path="$relative_dir_path$item_decoded"
+        local local_item_path="$DOCKER_DATA_ACTUAL_PATH/models/$server_item_relative_path"
 
-    for item_name in "${server_model_items[@]}"; do
-        local decoded_item_name
-        decoded_item_name=$(printf '%b' "${item_name//%/\x}")
+        # Add to the server files list (for later cleanup)
+        SERVER_FILES_LIST+=("$server_item_relative_path")
 
-        if [[ "$decoded_item_name" == */ ]]; then # It's a directory
-            log_info "Processing model directory '$decoded_item_name' from server list."
-            download_model "$item_name"
+        if [[ "$item_decoded" == */ ]]; then # It's a directory
+            log_info "Found directory on server: $server_item_relative_path. Descending..."
+            process_model_directory_recursively "$server_item_relative_path"
         else # It's a file
-            log_info "Processing model file '$decoded_item_name' from server list."
-            download_model "$item_name"
-        fi
-    done
-    log_info "Finished checking for new models."
-}
-download_model() {
-    local item_name="$1"
+            log_info "Found file on server: $server_item_relative_path"
+            # --- File download/update logic ---
+            local server_file_url="$SERVER_BASE_URL$AUTO_MODELS_PATH$server_item_relative_path"
 
-    local decoded_item_name
-    decoded_item_name=$(printf '%b' "${item_name//%/\x}")
+            local server_file_size_str
+            server_file_size_str=$(curl --max-time 10 -sI "$server_file_url" | grep -i Content-Length | awk '{print $2}' | tr -d '\r\n')
 
-    local current_item_source_url="$SERVER_BASE_URL$AUTO_MODELS_PATH$item_name"
-    local current_local_item_path="$DOCKER_DATA_ACTUAL_PATH/models/$decoded_item_name"
+            local server_file_size=-1
+            if [[ "$server_file_size_str" =~ ^[0-9]+$ ]]; then
+                server_file_size=$server_file_size_str
+            else
+                log_warn "Could not determine Content-Length for $server_file_url. Received: '$server_file_size_str'."
+            fi
 
-    if [[ "$decoded_item_name" == */ ]]; then
-        log_info "Ensuring local directory exists for server item '$item_name': $current_local_item_path"
-        mkdir -p "$current_local_item_path"
-        if [ $? -ne 0 ]; then
-            script_log "ERROR: Failed to create directory $current_local_item_path for model item $decoded_item_name"
-            return 1
-        fi
-
-        local files_in_dir_raw
-        files_in_dir_raw=$(curl -sL "$current_item_source_url" | grep -o '<a href="[^"]*"' | sed 's/<a href="//;s/"//' | grep -v '/$' | grep -v '^\.\./$' | grep -v '^Parent directory')
-
-        local curl_exit_code=$?
-        if [ $curl_exit_code -ne 0 ]; then
-             script_log "ERROR: Failed to retrieve file list for model directory $decoded_item_name from $current_item_source_url. Curl exit: $curl_exit_code"
-             return 1
-        fi
-
-        if [ -n "$files_in_dir_raw" ]; then
-            mapfile -t files_in_dir < <(echo "$files_in_dir_raw")
-            log_info "Found ${#files_in_dir[@]} files in server directory $decoded_item_name. Checking each file..."
-            for file_in_item_dir_encoded in "${files_in_dir[@]}"; do
-                local file_to_download_source_url="$current_item_source_url$file_in_item_dir_encoded"
-
-                local file_to_download_decoded_name
-                file_to_download_decoded_name=$(printf '%b' "${file_in_item_dir_encoded//%/\x}")
-                local file_to_download_local_path="$current_local_item_path$file_to_download_decoded_name"
-
-                log_info "Checking file in dir: $file_to_download_decoded_name (Source: $file_to_download_source_url)"
-
-                local server_file_size_str
-                server_file_size_str=$(curl --max-time 10 -sI "$file_to_download_source_url" | grep -i Content-Length | awk '{print $2}' | tr -d '\r\n')
-
-                local server_file_size=-1
-                if [[ "$server_file_size_str" =~ ^[0-9]+$ ]]; then
-                    server_file_size=$server_file_size_str
-                    log_info "Server file size for $file_to_download_decoded_name: $server_file_size bytes."
-                else
-                    log_warn "Could not determine Content-Length for $file_to_download_source_url. Received: '$server_file_size_str'. Will download if missing locally, or if local version exists (to be safe)."
-                fi
-
-                local should_download=false
-                if [ ! -f "$file_to_download_local_path" ]; then
-                    log_info "Local file $file_to_download_local_path does not exist. Scheduling for download."
+            local should_download=false
+            if [ ! -f "$local_item_path" ]; then
+                log_info "Local file does not exist. Downloading."
+                should_download=true
+            else
+                local local_file_size
+                local_file_size=$(stat -c%s "$local_item_path")
+                if [ "$server_file_size" -ne -1 ] && [ "$local_file_size" -ne "$server_file_size" ]; then
+                    log_info "Local file size ($local_file_size) differs from server ($server_file_size). Re-downloading."
                     should_download=true
                 else
-                    local local_file_size
-                    local_file_size=$(stat -c%s "$file_to_download_local_path")
-                    log_info "Local file $file_to_download_local_path exists. Size: $local_file_size bytes."
-                    if [ "$server_file_size" -ne -1 ] && [ "$local_file_size" -ne "$server_file_size" ]; then
-                        log_info "Local file size ($local_file_size) differs from server size ($server_file_size). Scheduling for download."
-                        should_download=true
-                    elif [ "$server_file_size" -eq -1 ]; then
-                         log_warn "Local file $file_to_download_local_path exists, but server file size unknown. Re-downloading to be safe, as it might have been updated."
-                         should_download=true
-                    else
-                        log_info "Local file size matches server size ($server_file_size bytes). Skipping download for $file_to_download_decoded_name."
-                        should_download=false
-                    fi
+                    log_info "Local file exists and size matches. Skipping."
                 fi
-
-                if [ "$should_download" = true ]; then
-                    log_info "Downloading: $file_to_download_source_url to $file_to_download_local_path"
-                    if download_file "$file_to_download_source_url" "$file_to_download_local_path"; then
-                        log_info "Successfully downloaded $file_to_download_decoded_name."
-                        # NEEDS_RESTART=true # This line is intentionally REMOVED
-                        if [ ! -f "$file_to_download_local_path" ] || [ ! -s "$file_to_download_local_path" ]; then
-                            script_log "CRITICAL_ERROR: File $file_to_download_local_path missing or empty after download for $file_to_download_decoded_name."
-                        else
-                            local dl_size=$(stat -c%s "$file_to_download_local_path")
-                            log_info "VERIFIED: File $file_to_download_local_path OK, size $dl_size for $file_to_download_decoded_name."
-                        fi
-                    else
-                        script_log "ERROR: Download failed for $file_to_download_source_url."
-                        # Optional: attempt to clean up partially downloaded file
-                        rm -f "$file_to_download_local_path"
-                    fi
-                fi
-            done
-        else
-            log_info "Model directory $decoded_item_name is empty on the server or no downloadable files found."
-        fi
-        return 0
-
-    else # Item is an individual file
-        log_info "Checking individual file: $decoded_item_name (Source: $current_item_source_url)"
-
-        local server_file_size_str
-        server_file_size_str=$(curl --max-time 10 -sI "$current_item_source_url" | grep -i Content-Length | awk '{print $2}' | tr -d '\r\n')
-
-        local server_file_size=-1
-        if [[ "$server_file_size_str" =~ ^[0-9]+$ ]]; then
-            server_file_size=$server_file_size_str
-            log_info "Server file size for $decoded_item_name: $server_file_size bytes."
-        else
-            log_warn "Could not determine Content-Length for $current_item_source_url. Received: '$server_file_size_str'. Will download if missing locally or if local version exists (to be safe)."
-        fi
-
-        local should_download=false
-        if [ ! -f "$current_local_item_path" ]; then
-            log_info "Local file $current_local_item_path does not exist. Scheduling for download."
-            should_download=true
-        else
-            local local_file_size
-            local_file_size=$(stat -c%s "$current_local_item_path")
-            log_info "Local file $current_local_item_path exists. Size: $local_file_size bytes."
-            if [ "$server_file_size" -ne -1 ] && [ "$local_file_size" -ne "$server_file_size" ]; then
-                log_info "Local file size ($local_file_size) differs from server size ($server_file_size). Scheduling for download."
-                should_download=true
-            elif [ "$server_file_size" -eq -1 ]; then
-                 log_warn "Local file $current_local_item_path exists, but server file size unknown. Re-downloading to be safe, as it might have been updated."
-                 should_download=true
-            else
-                log_info "Local file size matches server size ($server_file_size bytes). Skipping download for $decoded_item_name."
-                should_download=false
-            fi
-        fi
-
-        if [ "$should_download" = true ]; then
-            log_info "Downloading: $current_item_source_url to $current_local_item_path"
-            local parent_dir
-            parent_dir=$(dirname "$current_local_item_path")
-            mkdir -p "$parent_dir"
-            if [ $? -ne 0 ]; then
-                script_log "ERROR: Failed to create parent directory $parent_dir for model file $decoded_item_name"
-                return 1
             fi
 
-            if download_file "$current_item_source_url" "$current_local_item_path"; then
-                log_info "Successfully downloaded $decoded_item_name."
-                # NEEDS_RESTART=true # This line is intentionally REMOVED
-                if [ ! -f "$current_local_item_path" ] || [ ! -s "$current_local_item_path" ]; then
-                    script_log "CRITICAL_ERROR: File $current_local_item_path missing or empty after download for $decoded_item_name."
-                    return 1
+            if [ "$should_download" = true ]; then
+                log_info "Downloading: $server_file_url to $local_item_path"
+                if download_file "$server_file_url" "$local_item_path"; then
+                    log_info "Successfully downloaded $item_decoded."
                 else
-                    local dl_size=$(stat -c%s "$current_local_item_path")
-                    log_info "VERIFIED: File $current_local_item_path OK, size $dl_size for $decoded_item_name."
+                    script_log "ERROR: Download failed for $server_file_url."
+                    rm -f "$local_item_path" # Clean up partial download
                 fi
-            else
-                script_log "ERROR: Download failed for $current_item_source_url."
-                # Optional: attempt to clean up partially downloaded file
-                rm -f "$current_local_item_path"
-                return 1
             fi
         fi
-        return 0
+    done
+}
+
+# Main function to check for new models and sync (mirror)
+check_for_new_models() {
+    log_info "Starting model sync process..."
+
+    # Reset the server file list for this run
+    SERVER_FILES_LIST=()
+
+    # 1. Recursively scan server and download/update files
+    process_model_directory_recursively ""
+    log_info "Finished server scan and download phase."
+
+    # 2. Get a list of all local files and directories
+    local local_models_base_path="$DOCKER_DATA_ACTUAL_PATH/models/"
+    if [ ! -d "$local_models_base_path" ]; then
+        log_info "Local models directory does not exist. Nothing to clean up."
+        return
     fi
+
+    mapfile -t local_files < <(find "$local_models_base_path" -path "$local_models_base_path" -o -print | sed "s|^$local_models_base_path||")
+
+    # 3. Compare and delete local files not on the server
+    log_info "Comparing local files to server file list for cleanup..."
+    local found
+    for local_item in "${local_files[@]}"; do
+        if [ -z "$local_item" ]; then continue; fi
+        found=0
+        for server_item in "${SERVER_FILES_LIST[@]}"; do
+            if [ "$local_item" = "$server_item" ]; then
+                found=1
+                break
+            fi
+        done
+
+        if [ $found -eq 0 ]; then
+            local full_local_path="$local_models_base_path$local_item"
+            if [ -f "$full_local_path" ]; then
+                log_info "DELETING file not on server: $full_local_path"
+                rm -f "$full_local_path"
+            elif [ -d "$full_local_path" ]; then
+                # This directory might be deleted later if it's empty
+                log_info "Directory not on server list: $full_local_path. Will be cleaned up if empty."
+            fi
+        fi
+    done
+
+    # 4. Clean up empty directories
+    log_info "Cleaning up empty directories..."
+    find "$local_models_base_path" -depth -type d -empty -exec rmdir {} \;
+
+    log_info "Finished model sync process."
 }
 restart_comfyui_containers() {
     log_info "Beginning ComfyUI container restart process..."
@@ -558,9 +564,15 @@ restart_comfyui_containers() {
 
 # Main loop
 main() {
-    log_info "Auto download service started."
+    log_info "Auto download service started (Version: $SCRIPT_VERSION)."
+
+    # Set model directory permissions on startup
+    set_model_permissions
 
     while true; do
+        # Check for self-update at the beginning of each cycle
+        check_for_self_update
+
         NEEDS_RESTART=false
         log_info "-------------------- New Check Cycle --------------------"
         log_info "Checking for updates..."
