@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 chmod u+x "$0"
 
 # Source utility scripts
@@ -367,6 +368,7 @@ check_for_new_nodes() {
 SERVER_FILES_LIST=()
 
 # Recursively process a directory on the model server
+# Returns 0 on success, 1 on failure to connect/list items.
 process_model_directory_recursively() {
     local relative_dir_path="$1" # e.g., "checkpoints/" or "" for root
     local full_server_url="$SERVER_BASE_URL$AUTO_MODELS_PATH$relative_dir_path"
@@ -377,10 +379,11 @@ process_model_directory_recursively() {
 
     # Get directory listing from server
     local server_items_raw
-    server_items_raw=$(curl -sL "$full_server_url" | grep -o '<a href="[^"]*"' | sed 's/<a href="//;s/"//' | grep -v '^\.\./$' | grep -v '^Parent directory')
+    # Use --fail to make curl exit with an error if the server returns 4xx or 5xx
+    server_items_raw=$(curl -sL --fail "$full_server_url" | grep -o '<a href="[^"]*"' | sed 's/<a href="//;s/"//' | grep -v '^\.\./$' | grep -v '^Parent directory')
     if [ $? -ne 0 ]; then
-        script_log "ERROR: Failed to retrieve item list from server directory: $full_server_url"
-        return
+        script_log "ERROR: Failed to retrieve item list from server directory: $full_server_url. Aborting model sync for this cycle."
+        return 1 # Indicate failure
     fi
 
     mapfile -t server_items < <(echo "$server_items_raw")
@@ -397,7 +400,10 @@ process_model_directory_recursively() {
 
         if [[ "$item_decoded" == */ ]]; then # It's a directory
             log_info "Found directory on server: $server_item_relative_path. Descending..."
-            process_model_directory_recursively "$server_item_relative_path"
+            # If a recursive call fails, we must propagate the failure up.
+            if ! process_model_directory_recursively "$server_item_relative_path"; then
+                return 1 # Propagate failure
+            fi
         else # It's a file
             log_info "Found file on server: $server_item_relative_path"
             # --- File download/update logic ---
@@ -439,6 +445,8 @@ process_model_directory_recursively() {
             fi
         fi
     done
+
+    return 0 # Success
 }
 
 # Main function to check for new models and sync (mirror)
@@ -449,8 +457,13 @@ check_for_new_models() {
     SERVER_FILES_LIST=()
 
     # 1. Recursively scan server and download/update files
-    process_model_directory_recursively ""
-    log_info "Finished server scan and download phase."
+    # The function now returns a status code. 0 for success, 1 for failure.
+    if ! process_model_directory_recursively ""; then
+        script_log "ERROR: Server scan failed. Skipping cleanup of local models to prevent data loss."
+        return # Exit without cleaning up
+    fi
+    log_info "Finished server scan and download phase successfully."
+
 
     # 2. Get a list of all local files and directories
     local local_models_base_path="$DOCKER_DATA_ACTUAL_PATH/models/"
