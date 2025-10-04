@@ -2,6 +2,28 @@
 # SCRIPT_VERSION_4
 # Kombinert skript for ComfyUI Docker Oppsett og Modelldenedlasting - Nå en koordinator.
 
+# --- Argument Parsing and Mode Setup ---
+# We parse arguments first to enable headless operation without prompts.
+HEADLESS_UPDATE=false
+# Preserve original args for potential exec on script restart after update.
+ORIGINAL_ARGS=("$@")
+
+# Cannot log here yet as utils are not sourced.
+for arg in "${ORIGINAL_ARGS[@]}"; do
+  case $arg in
+    -update)
+      HEADLESS_UPDATE=true
+      ;;
+    -linux)
+      export USER_SELECTED_OS="linux"
+      ;;
+    -windows)
+      export USER_SELECTED_OS="windows"
+      ;;
+  esac
+done
+
+
 # Global variables for folder sizes
 INPUT_SIZE_DISPLAY="N/A"
 OUTPUT_SIZE_DISPLAY="N/A"
@@ -46,7 +68,17 @@ source "$(dirname "$0")/model_downloader.sh" || { echo "ERROR: model_downloader.
 trap 'script_log "INFO: --- UltimateComfy.sh execution finished with exit status $? ---"' EXIT
 
 perform_self_update() {
-    script_log "INFO: Attempting self-update..."
+    local mode="$1" # "headless" or ""
+    shift || true   # Consume mode argument, ignore error if no args
+    local original_args=("$@") # Store the rest of the original arguments
+
+    _maybe_pause() {
+        if [ "$mode" != "headless" ]; then
+            press_enter_to_continue
+        fi
+    }
+
+    script_log "INFO: Attempting self-update (mode: ${mode:-interactive})..."
     local script_path_abs
     script_path_abs=$(readlink -f "$0") # Absolute path to the currently running script
     local script_dir
@@ -55,17 +87,17 @@ perform_self_update() {
     if [ ! -d "$script_dir/.git" ]; then
         log_error "FEIL: Dette skriptet ser ikke ut til å være i en Git repository-mappe."
         log_error "Kan ikke oppdatere. Gå til $script_dir og initialiser git eller klon på nytt."
-        press_enter_to_continue
+        _maybe_pause
         return
     fi
 
     # Change to the script's directory to ensure git commands run in the correct context
-    cd "$script_dir" || { log_error "FEIL: Kunne ikke bytte til mappen $script_dir"; press_enter_to_continue; return; }
+    cd "$script_dir" || { log_error "FEIL: Kunne ikke bytte til mappen $script_dir"; _maybe_pause; return; }
 
     log_info "Sjekker for oppdateringer (git fetch)..."
     git fetch || {
         log_error "FEIL: 'git fetch' mislyktes. Sjekk internettforbindelsen og Git-oppsettet."
-        press_enter_to_continue
+        _maybe_pause
         cd - > /dev/null # Return to previous directory
         return
     }
@@ -77,7 +109,7 @@ perform_self_update() {
 
     if [ "$local_commit" = "$remote_commit" ]; then
         log_info "Du har allerede den nyeste versjonen."
-        press_enter_to_continue
+        _maybe_pause
         cd - > /dev/null
         return
     fi
@@ -89,7 +121,7 @@ perform_self_update() {
         log_info "Lokale endringer funnet. Prøver å midlertidig lagre dem (git stash)..."
         git stash push -u -m "Autostash before update" && stash_needed=true || {
             log_error "FEIL: 'git stash' mislyktes. Løs konflikter manuelt og prøv igjen."
-            press_enter_to_continue
+            _maybe_pause
             cd - > /dev/null
             return
         }
@@ -102,7 +134,7 @@ perform_self_update() {
     fi
 
     if git pull --ff-only; then # Using --ff-only to avoid merge commits, prefer rebase if needed
-        log_info "Oppdatering vellykket."
+        log_success "Oppdatering vellykket."
         if [ "$stash_needed" = true ]; then
             log_info "Prøver å gjenopprette midlertidig lagrede endringer (git stash pop)..."
             if ! git stash pop; then
@@ -122,23 +154,23 @@ perform_self_update() {
 
         if [ "$new_local_commit" != "$local_commit" ] && [ "$pre_update_checksum" != "$post_update_checksum" ]; then
             log_info "UltimateComfy.sh ble oppdatert. Starter på nytt..."
-            press_enter_to_continue
+            _maybe_pause
             cd - > /dev/null # Return to original directory before exec
-            exec "$script_path_abs" "$@" # Use script_path_abs for exec
+            exec "$script_path_abs" "${original_args[@]}" # Use original args for exec
         elif [ "$new_local_commit" != "$local_commit" ]; then
             log_info "Oppdateringer ble lastet ned, men UltimateComfy.sh ble ikke endret. Går tilbake til menyen."
-            press_enter_to_continue
+            _maybe_pause
         else
             # This case should ideally not be hit if local_commit != remote_commit
             log_info "Ingen endringer i UltimateComfy.sh etter pull, selv om HEAD endret seg. Merkelig."
-            press_enter_to_continue
+            _maybe_pause
         fi
     else
         log_error "FEIL: 'git pull' mislyktes. Løs eventuelle konflikter manuelt i mappen $script_dir og prøv igjen."
         if [ "$stash_needed" = true ]; then
             log_warn "Dine lokale endringer er fortsatt i 'stash'. Du kan gjenopprette dem med 'git stash pop' etter å ha løst pull-konflikter."
         fi
-        press_enter_to_continue
+        _maybe_pause
     fi
 
     cd - > /dev/null # Return to original directory if not restarting
@@ -681,38 +713,20 @@ Choose an option:" \
 # The first log specific to this main script.
 script_log "INFO: --- UltimateComfy.sh (Refactored) startpunkt ---"
 
-# --- Headless Update Check ---
-if [ "$1" == "-update" ]; then
-    script_log "INFO: Headless update mode activated via -update flag."
-    local update_script_path
-    update_script_path="$(dirname "$0")/update_scripts.sh"
+# --- Headless vs Interactive Execution ---
+if [ "$HEADLESS_UPDATE" = true ]; then
+    # This is a headless update run.
+    script_log "INFO: Headless update mode activated. Running self-update..."
+    # Call the update function in headless mode, passing original args
+    perform_self_update "headless" "${ORIGINAL_ARGS[@]}"
+    update_exit_code=$?
+    script_log "INFO: Headless update finished with exit code $update_exit_code. Exiting."
+    exit $update_exit_code
+else
+    # This is a normal interactive run.
+    # Check if startup scripts need to be updated before showing the menu
+    check_and_update_startup_scripts
 
-    if [ -f "$update_script_path" ]; then
-        if [ ! -x "$update_script_path" ]; then
-            log_warn "Update script at '$update_script_path' is not executable. Attempting to set permissions..."
-            chmod +x "$update_script_path"
-        fi
-
-        if [ -x "$update_script_path" ]; then
-            log_info "Executing headless update script..."
-            "$update_script_path"
-            local exit_code=$?
-            script_log "INFO: Headless update script finished with exit code $exit_code. Exiting UltimateComfy.sh."
-            exit $exit_code
-        else
-            log_error "Update script at '$update_script_path' could not be made executable. Please check permissions."
-            exit 1
-        fi
-    else
-        log_error "Update script not found at: $update_script_path"
-        exit 1
-    fi
+    main_menu
+    script_log "DEBUG: main_menu call finished (UltimateComfy.sh should have exited from within main_menu)."
 fi
-
-# Check if startup scripts need to be updated before showing the menu
-check_and_update_startup_scripts
-
-# log_info "Starter ComfyUI Unified Tool (v4 Refactored)..." # This kind of message is now in common_utils.sh or can be added if a distinct one is needed
-
-main_menu
-script_log "DEBUG: main_menu call finished (UltimateComfy.sh should have exited from within main_menu)."
