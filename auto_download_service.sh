@@ -436,11 +436,12 @@ process_model_directory_recursively() {
 
             if [ "$should_download" = true ]; then
                 log_info "Downloading: $server_file_url to $local_item_path"
-                if download_file "$server_file_url" "$local_item_path"; then
-                    log_info "Successfully downloaded $item_decoded."
-                else
-                    script_log "ERROR: Download failed for $server_file_url."
+                if ! download_file "$server_file_url" "$local_item_path"; then
+                    script_log "ERROR: Download failed for $server_file_url. Aborting sync cycle."
                     rm -f "$local_item_path" # Clean up partial download
+                    return 1 # Propagate failure
+                else
+                    log_info "Successfully downloaded $item_decoded."
                 fi
             fi
         fi
