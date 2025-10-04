@@ -391,25 +391,50 @@ process_model_directory_recursively() {
     for item_encoded in "${server_items[@]}"; do
         local item_decoded
         item_decoded=$(printf '%b' "${item_encoded//%/\x}")
-
         local server_item_relative_path="$relative_dir_path$item_decoded"
-        local local_item_path="$DOCKER_DATA_ACTUAL_PATH/models/$server_item_relative_path"
 
-        # Add to the server files list (for later cleanup)
-        SERVER_FILES_LIST+=("$server_item_relative_path")
-
-        if [[ "$item_decoded" == */ ]]; then # It's a directory
-            log_info "Found directory on server: $server_item_relative_path. Descending..."
-            # If a recursive call fails, we must propagate the failure up.
+        # Determine if the item is a directory or a file.
+        # Method 1: Item has a trailing slash. It's a directory.
+        if [[ "$item_decoded" == */ ]]; then
+            SERVER_FILES_LIST+=("$server_item_relative_path")
+            log_info "Found directory on server (by slash): $server_item_relative_path. Descending..."
             if ! process_model_directory_recursively "$server_item_relative_path"; then
                 return 1 # Propagate failure
             fi
-        else # It's a file
-            log_info "Found file on server: $server_item_relative_path"
-            # --- File download/update logic ---
-            local server_file_url="$SERVER_BASE_URL$AUTO_MODELS_PATH$server_item_relative_path"
+            continue # Continue to next item in the loop
+        fi
 
+        # Method 2: Item does not have a trailing slash. It could be a file or a directory.
+        # We perform a HEAD request to check its Content-Type. 'text/html' implies a directory.
+        local item_url="$SERVER_BASE_URL$AUTO_MODELS_PATH$server_item_relative_path"
+        local content_type
+        content_type=$(curl -sI --max-time 10 --fail "$item_url" 2>/dev/null | grep -i '^Content-Type:' | awk '{print $2}' | tr -d '\r\n')
+        local curl_exit_code=$?
+
+        if [ $curl_exit_code -ne 0 ]; then
+            script_log "ERROR: HEAD request failed for '$item_url'. Cannot determine item type. Aborting sync cycle."
+            return 1 # Propagate failure
+        fi
+
+        if [[ "$content_type" == text/html* ]]; then
+            # It's a directory. Add trailing slash for consistency and descend.
+            local dir_path_with_slash="${server_item_relative_path}/"
+            SERVER_FILES_LIST+=("$dir_path_with_slash")
+            log_info "Found directory on server (by content-type): $dir_path_with_slash. Descending..."
+            if ! process_model_directory_recursively "$dir_path_with_slash"; then
+                return 1 # Propagate failure
+            fi
+        else
+            # It's a file. Add to list and process for download.
+            SERVER_FILES_LIST+=("$server_item_relative_path")
+            log_info "Found file on server: $server_item_relative_path"
+
+            local local_item_path="$DOCKER_DATA_ACTUAL_PATH/models/$server_item_relative_path"
+            local server_file_url="$item_url" # URL is already defined above
+
+            # --- File download/update logic ---
             local server_file_size_str
+            # We can reuse the HEAD request info, but it's cleaner to just get it again.
             server_file_size_str=$(curl --max-time 10 -sI "$server_file_url" | grep -i Content-Length | awk '{print $2}' | tr -d '\r\n')
 
             local server_file_size=-1
