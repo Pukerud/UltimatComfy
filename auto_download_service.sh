@@ -407,14 +407,26 @@ process_model_directory_recursively() {
         # Method 2: Item does not have a trailing slash. It could be a file or a directory.
         # We perform a HEAD request to check its Content-Type. 'text/html' implies a directory.
         local item_url="$SERVER_BASE_URL$AUTO_MODELS_PATH$server_item_relative_path"
-        local content_type
-        content_type=$(curl -sI --max-time 10 --fail "$item_url" 2>/dev/null | grep -i '^Content-Type:' | awk '{print $2}' | tr -d '\r\n')
+
+        # --- DIAGNOSTIC LOGGING ---
+        script_log "Performing HEAD request for: $item_url"
+        local head_output
+        head_output=$(curl -sI --max-time 10 --fail "$item_url" 2>/dev/null)
         local curl_exit_code=$?
+
+        script_log "--- START HEAD Response for $item_url ---"
+        # Log the multi-line output correctly by iterating over each line
+        echo "$head_output" | while IFS= read -r line; do script_log "  $line"; done
+        script_log "--- END HEAD Response for $item_url (Exit Code: $curl_exit_code) ---"
+        # --- END DIAGNOSTIC LOGGING ---
 
         if [ $curl_exit_code -ne 0 ]; then
             script_log "ERROR: HEAD request failed for '$item_url'. Cannot determine item type. Aborting sync cycle."
             return 1 # Propagate failure
         fi
+
+        local content_type
+        content_type=$(echo "$head_output" | grep -i '^Content-Type:' | awk '{print $2}' | tr -d '\r\n')
 
         if [[ "$content_type" == text/html* ]]; then
             # It's a directory. Add trailing slash for consistency and descend.
@@ -505,9 +517,15 @@ check_for_new_models() {
     local found
     for local_item in "${local_files[@]}"; do
         if [ -z "$local_item" ]; then continue; fi
+
         found=0
+        # Normalize paths by removing any trailing slashes for a reliable comparison.
+        # This handles cases where the server lists 'loras/' and 'find' lists 'loras'.
+        local local_item_norm="${local_item%/}"
+
         for server_item in "${SERVER_FILES_LIST[@]}"; do
-            if [ "$local_item" = "$server_item" ]; then
+            local server_item_norm="${server_item%/}"
+            if [ "$local_item_norm" = "$server_item_norm" ]; then
                 found=1
                 break
             fi
