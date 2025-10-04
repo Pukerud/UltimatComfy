@@ -681,6 +681,34 @@ Choose an option:" \
 # The first log specific to this main script.
 script_log "INFO: --- UltimateComfy.sh (Refactored) startpunkt ---"
 
+# --- Headless Update Check ---
+if [ "$1" == "-update" ]; then
+    script_log "INFO: Headless update mode activated via -update flag."
+    local update_script_path
+    update_script_path="$(dirname "$0")/update_scripts.sh"
+
+    if [ -f "$update_script_path" ]; then
+        if [ ! -x "$update_script_path" ]; then
+            log_warn "Update script at '$update_script_path' is not executable. Attempting to set permissions..."
+            chmod +x "$update_script_path"
+        fi
+
+        if [ -x "$update_script_path" ]; then
+            log_info "Executing headless update script..."
+            "$update_script_path"
+            local exit_code=$?
+            script_log "INFO: Headless update script finished with exit code $exit_code. Exiting UltimateComfy.sh."
+            exit $exit_code
+        else
+            log_error "Update script at '$update_script_path' could not be made executable. Please check permissions."
+            exit 1
+        fi
+    else
+        log_error "Update script not found at: $update_script_path"
+        exit 1
+    fi
+fi
+
 # Check if startup scripts need to be updated before showing the menu
 check_and_update_startup_scripts
 
