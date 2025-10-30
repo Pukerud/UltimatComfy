@@ -18,7 +18,7 @@ DOCKER_CUDA_DEVEL_TAG="12.8.1-cudnn-devel-ubuntu22.04"
 # RUNTIME image tag er nå DYNAMISK satt fra DOCKER_CUDA_DEVEL_TAG i Dockerfile-genereringen.
 
 # Version for the generated startup scripts.
-STARTUP_SCRIPT_VERSION="1.1"
+STARTUP_SCRIPT_VERSION="1.2"
 
 # Dynamisk satte stier (will be set by initialize_docker_paths)
 DOCKER_CONFIG_ACTUAL_PATH=""
