@@ -46,10 +46,50 @@ script_log "INFO: BASE_DOCKER_SETUP_DIR set to $BASE_DOCKER_SETUP_DIR"
 # trap 'script_log "INFO: --- Script execution finished with exit status $? ---"' EXIT
 
 # --- Felles Hjelpefunksjoner ---
-log_info() { echo -e "${BLUE}INFO:${NC} $1"; script_log "INFO: $1"; }
-log_success() { echo -e "${GREEN}SUCCESS:${NC} $1"; script_log "SUCCESS: $1"; }
-log_warn() { echo -e "${YELLOW}WARN:${NC} $1"; script_log "WARN: $1"; }
-log_error() { echo -e "${RED}ERROR:${NC} $1" >&2; script_log "ERROR: $1"; }
+
+# Helper to check if auto-downloader logging is disabled.
+_is_autodownload_logging_disabled() {
+    # This function is only relevant when called from the auto_download_service.sh script.
+    if [[ "$(basename -- "$0")" != "auto_download_service.sh" ]]; then
+        return 1 # Not disabled, because we are not in the target script.
+    fi
+
+    local config_file="$BASE_DOCKER_SETUP_DIR/autodownload.cfg"
+    if [ -f "$config_file" ] && grep -q "LOGGING_ENABLED=false" "$config_file"; then
+        return 0 # Disabled.
+    fi
+
+    return 1 # Not disabled.
+}
+
+log_info() {
+    if _is_autodownload_logging_disabled; then
+        script_log "INFO (from auto_download_service.sh, suppressed): $1"
+        return
+    fi
+    echo -e "${BLUE}INFO:${NC} $1"; script_log "INFO: $1";
+}
+log_success() {
+    if _is_autodownload_logging_disabled; then
+        script_log "SUCCESS (from auto_download_service.sh, suppressed): $1"
+        return
+    fi
+    echo -e "${GREEN}SUCCESS:${NC} $1"; script_log "SUCCESS: $1";
+}
+log_warn() {
+    if _is_autodownload_logging_disabled; then
+        script_log "WARN (from auto_download_service.sh, suppressed): $1"
+        return
+    fi
+    echo -e "${YELLOW}WARN:${NC} $1"; script_log "WARN: $1";
+}
+log_error() {
+    if _is_autodownload_logging_disabled; then
+        script_log "ERROR (from auto_download_service.sh, suppressed): $1"
+        return
+    fi
+    echo -e "${RED}ERROR:${NC} $1" >&2; script_log "ERROR: $1";
+}
 
 press_enter_to_continue() {
     read -r -p "Trykk Enter for å fortsette..." dummy_var_for_read </dev/tty

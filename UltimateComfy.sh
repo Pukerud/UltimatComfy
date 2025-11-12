@@ -335,6 +335,55 @@ toggle_autodownloader() {
     press_enter_to_continue
 }
 
+toggle_autodownload_logging() {
+    local config_file="$BASE_DOCKER_SETUP_DIR/autodownload.cfg"
+    local log_file="$BASE_DOCKER_SETUP_DIR/auto_download_service.log"
+
+    # Sørg for at konfigurasjonsfilen eksisterer
+    if [ ! -f "$config_file" ]; then
+        log_warn "Konfigurasjonsfilen $config_file ble ikke funnet. Oppretter med logging deaktivert."
+        echo "LOGGING_ENABLED=false" > "$config_file"
+    fi
+
+    # Les gjeldende status
+    local current_status
+    current_status=$(grep "LOGGING_ENABLED" "$config_file" | cut -d'=' -f2)
+
+    local action
+    if [ "$current_status" == "true" ]; then
+        log_info "Auto-nedlasting logging er for øyeblikket AKTIVERT."
+        action="deaktiver"
+    else
+        log_info "Auto-nedlasting logging er for øyeblikket DEAKTIVERT."
+        action="aktiver"
+    fi
+
+    # Spør brukeren om å endre
+    local confirm_choice
+    read -r -p "Ønsker du å $action auto-nedlasting logging? (ja/nei): " confirm_choice
+    if [[ ! "$confirm_choice" =~ ^[Jj]([Aa])?$ ]]; then
+        log_info "Operasjon avbrutt."
+        press_enter_to_continue
+        return
+    fi
+
+    # Utfør endringen
+    if [ "$action" == "deaktiver" ]; then
+        echo "LOGGING_ENABLED=false" > "$config_file"
+        log_success "Auto-nedlasting logging er nå DEAKTIVERT."
+        if [ -f "$log_file" ]; then
+            log_info "Sletter loggfil: $log_file..."
+            rm "$log_file"
+            log_success "Loggfil slettet."
+        fi
+    else
+        echo "LOGGING_ENABLED=true" > "$config_file"
+        log_success "Auto-nedlasting logging er nå AKTIVERT."
+        log_info "Nye logger vil bli skrevet til $log_file ved neste kjøring av tjenesten."
+    fi
+    press_enter_to_continue
+}
+
 update_folder_sizes() {
     script_log "INFO: Updating folder sizes..."
     local total_input_kb=0
@@ -521,15 +570,16 @@ Choose an option:" \
                 "10" "Update Frontend" \
                 "11" "Installer og kjør ncdu" \
                 "12" "Toggle Auto-Downloader" \
-                "13" "Clean ComfyUI Folders" \
-                "14" "Avslutt" \
+                "13" "Toggle Auto-Download Logging" \
+                "14" "Clean ComfyUI Folders" \
+                "15" "Avslutt" \
                 2>/dev/tty)
 
             local dialog_exit_status=$?
             script_log "DEBUG: dialog command finished. main_choice='$main_choice', dialog_exit_status='$dialog_exit_status'"
             if [ $dialog_exit_status -ne 0 ]; then
-                main_choice="14" # Updated for new Avslutt number
-                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 14."
+                main_choice="15" # Updated for new Avslutt number
+                script_log "DEBUG: Dialog cancelled or Exit selected, main_choice set to 15."
             fi
         else
             script_log "DEBUG: Using basic menu fallback."
@@ -552,10 +602,11 @@ Choose an option:" \
             echo "10) Update Frontend"
             echo "11) Installer og kjør ncdu"
             echo "12) Toggle Auto-Downloader"
-            echo "13) Clean ComfyUI Folders"
-            echo "14) Avslutt"
+            echo "13) Toggle Auto-Download Logging"
+            echo "14) Clean ComfyUI Folders"
+            echo "15) Avslutt"
             echo "--------------------------------"
-            echo -n "Velg et alternativ (1-14): " >&2
+            echo -n "Velg et alternativ (1-15): " >&2
             read -r main_choice </dev/tty
             script_log "DEBUG: Basic menu read finished. main_choice='$main_choice'"
         fi
@@ -685,12 +736,16 @@ Choose an option:" \
                 toggle_autodownloader
                 ;;
             "13")
+                script_log "INFO: User selected 'Toggle Auto-Download Logging'."
+                toggle_autodownload_logging
+                ;;
+            "14")
                 script_log "INFO: User selected 'Clean ComfyUI Folders'."
                 clean_comfyui_folders
                 press_enter_to_continue
                 ;;
-            "14")
-                script_log "DEBUG: main_menu attempting to exit (Option 14)."
+            "15")
+                script_log "DEBUG: main_menu attempting to exit (Option 15)."
                 log_info "Avslutter." # from common_utils.sh
                 clear
                 exit 0
@@ -700,7 +755,7 @@ Choose an option:" \
                     # dialog is from common_utils.sh (via ensure_dialog_installed)
                     dialog --title "Ugyldig valg" --msgbox "Vennligst velg et gyldig alternativ fra menyen." 6 50 2>/dev/tty
                 else
-                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-14." # from common_utils.sh
+                    log_warn "Ugyldig valg. Skriv inn et tall fra 1-15." # from common_utils.sh
                 fi
                 press_enter_to_continue # from common_utils.sh
                 ;;

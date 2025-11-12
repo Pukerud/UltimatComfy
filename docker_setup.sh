@@ -18,7 +18,7 @@ DOCKER_CUDA_DEVEL_TAG="12.8.1-cudnn-devel-ubuntu22.04"
 # RUNTIME image tag er nå DYNAMISK satt fra DOCKER_CUDA_DEVEL_TAG i Dockerfile-genereringen.
 
 # Version for the generated startup scripts.
-STARTUP_SCRIPT_VERSION="1.2"
+STARTUP_SCRIPT_VERSION="1.3"
 
 # Dynamisk satte stier (will be set by initialize_docker_paths)
 DOCKER_CONFIG_ACTUAL_PATH=""
@@ -59,6 +59,16 @@ regenerate_startup_scripts() {
     if [ "$num_gpus" -eq 0 ]; then
         log_warn "Ingen GPU-konfigurasjoner funnet. Kan ikke generere oppstartskript."
         return 1
+    fi
+
+    # Opprett eller oppdater auto-nedlasting-konfigurasjonsfilen
+    local autodownload_config_file="$BASE_DOCKER_SETUP_DIR/autodownload.cfg"
+    if [ ! -f "$autodownload_config_file" ]; then
+        log_info "Oppretter standard auto-nedlasting-konfigurasjonsfil på $autodownload_config_file..."
+        echo "LOGGING_ENABLED=false" > "$autodownload_config_file"
+        log_success "Standard konfigurasjonsfil opprettet med logging deaktivert."
+    else
+        log_info "Auto-nedlasting-konfigurasjonsfil finnes allerede. Beholder eksisterende innstillinger."
     fi
 
     log_info "Genererer $DOCKER_SCRIPTS_ACTUAL_PATH/start_comfyui.sh (Version: $STARTUP_SCRIPT_VERSION)..."
@@ -304,6 +314,12 @@ perform_docker_initial_setup() {
         mkdir -p "$DOCKER_DATA_ACTUAL_PATH/cache/gpu${i}/whisperx"
     done
     log_success "Katalogstruktur opprettet."
+
+    # Opprett standard auto-nedlasting-konfigurasjonsfil for nye oppsett
+    local autodownload_config_file="$BASE_DOCKER_SETUP_DIR/autodownload.cfg"
+    log_info "Oppretter standard auto-nedlasting-konfigurasjonsfil på $autodownload_config_file..."
+    echo "LOGGING_ENABLED=false" > "$autodownload_config_file"
+    log_success "Standard konfigurasjonsfil opprettet med logging deaktivert."
 
     log_info "Genererer Dockerfile med printf..."
     (
