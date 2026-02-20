@@ -262,6 +262,55 @@ md_download_file() {
     fi;
 }
 
+md_download_folder_recursive() {
+    local source_url_base="$1"
+    local local_target_base="$2"
+
+    script_log "DEBUG: ENTERING md_download_folder_recursive for $source_url_base -> $local_target_base"
+
+    # Ensure target directory exists
+    if [ ! -d "$local_target_base" ]; then
+        if ! mkdir -p "$local_target_base"; then
+             log_error "Kunne ikke opprette mappe: $local_target_base"
+             return 1
+        fi
+    fi
+
+    local links
+    links=$(md_get_links_from_url "$source_url_base")
+
+    if [ -z "$links" ]; then
+        log_warn "Ingen innhold funnet i $source_url_base"
+        return 0
+    fi
+
+    # Iterate over links
+    while IFS= read -r link || [ -n "$link" ]; do
+        if [ -z "$link" ]; then continue; fi
+
+        # Check if it is a directory (ends with /)
+        if [[ "$link" == */ ]]; then
+             # Recurse
+             local new_source="$source_url_base$link"
+             local new_target="$local_target_base/$link"
+             # Remove trailing slash from target for safety/cleanliness
+             new_target="${new_target%/}"
+
+             md_download_folder_recursive "$new_source" "$new_target"
+        else
+             # File
+             local file_source="$source_url_base$link"
+             local file_target="$local_target_base/$link"
+
+             if [ -f "$file_target" ]; then
+                 log_info "Skipper eksisterende fil: $link"
+             else
+                 md_download_file "$file_source" "$file_target"
+             fi
+        fi
+    done <<< "$links"
+}
+
 md_handle_package_download() {
     script_log "DEBUG: ENTERING md_handle_package_download (model_downloader.sh)"
     ensure_dialog_installed # from common_utils.sh
@@ -485,197 +534,179 @@ run_model_downloader() {
 
         case "$md_choice_val" in
             "1") # Utforsk mapper og last ned enkeltfiler
-                script_log "DEBUG: Option 1 selected - Utforsk mapper"
-                local explore_outer_loop_active=true
-                while $explore_outer_loop_active; do
-                    local selected_server_subdir_val_explore=""
-                    local map_links_output_val_explore
-                    map_links_output_val_explore=$(md_get_links_from_url "$MD_SERVER_BASE_URL")
-                    local map_links_val_explore
-                    map_links_val_explore=$(echo "$map_links_output_val_explore" | grep '/$')
+                script_log "DEBUG: Option 1 selected - Utforsk mapper (Refactored)"
+                local current_relative_path=""
+                local explore_active=true
 
-                    if [ -z "$map_links_val_explore" ]; then
-                        if [ "$md_dialog_available" -eq 0 ]; then
-                            dialog --title "Servermapper" --msgbox "Fant ingen undermapper på serveren." 6 50 2>/dev/tty
-                        else
-                            log_warn "Fant ingen undermapper på serveren."
-                            press_enter_to_continue
-                        fi
-                        explore_outer_loop_active=false # Exit outer loop
-                        continue
+                while $explore_active; do
+                    local current_url="${MD_SERVER_BASE_URL}${current_relative_path}"
+                    script_log "DEBUG: Exploring URL: $current_url"
+
+                    local links_output
+                    links_output=$(md_get_links_from_url "$current_url")
+
+                    local menu_items=()
+                    local item_map=() # Maps index to actual name (with suffix / for dirs)
+                    local item_idx=1
+
+                    if [ -n "$current_relative_path" ]; then
+                        menu_items+=("$item_idx" ".. (Gå opp)")
+                        item_map+=("..")
+                        item_idx=$((item_idx + 1))
                     fi
+
+                    local dirs=()
+                    local files=()
+
+                    while IFS= read -r link || [ -n "$link" ]; do
+                        if [ -z "$link" ]; then continue; fi
+                        # Trim carriage return if present (just in case)
+                        link="${link//$'\r'/}"
+                        if [[ "$link" == */ ]]; then
+                            dirs+=("$link")
+                        else
+                            files+=("$link")
+                        fi
+                    done <<< "$links_output"
+
+                    for d in "${dirs[@]}"; do
+                        menu_items+=("$item_idx" "$d")
+                        item_map+=("$d")
+                        item_idx=$((item_idx + 1))
+                    done
+
+                    for f in "${files[@]}"; do
+                        menu_items+=("$item_idx" "$f")
+                        item_map+=("$f")
+                        item_idx=$((item_idx + 1))
+                    done
+
+                    if [ ${#item_map[@]} -eq 0 ]; then
+                         log_warn "Mappen er tom."
+                    fi
+
+                    local selection_idx=""
+                    local selection_name=""
 
                     if [ "$md_dialog_available" -eq 0 ]; then
-                        local dialog_map_items=()
-                        local temp_map_array=() # To map tags to actual dir names
-                        local map_idx=1
-                        while IFS= read -r line; do
-                            dialog_map_items+=("$map_idx" "$line")
-                            temp_map_array+=("$line")
-                            map_idx=$((map_idx + 1))
-                        done <<< "$map_links_val_explore"
+                        selection_idx=$(dialog --clear --stdout \
+                            --title "Utforsk: /${current_relative_path}" \
+                            --menu "Velg en mappe for å gå inn, eller en fil for å laste ned:" \
+                            20 76 15 \
+                            "${menu_items[@]}" \
+                            "EXIT" "Avslutt utforsking" \
+                            2>/dev/tty)
 
-                        local map_choice_tag
-                        map_choice_tag=$(dialog --clear --stdout --title "Utforsk Servermapper" --menu "Velg en mappe på serveren $MD_SERVER_BASE_URL:" 20 76 15 "${dialog_map_items[@]}" "BACK" "Tilbake til forrige meny" 2>/dev/tty)
-                        local map_dialog_exit_status=$?
-
-                        if [ $map_dialog_exit_status -ne 0 ] || [ "$map_choice_tag" == "BACK" ]; then
-                            explore_outer_loop_active=false # Exit outer loop
+                        local ret=$?
+                        if [ $ret -ne 0 ] || [ "$selection_idx" == "EXIT" ]; then
+                            explore_active=false
                             continue
-                        fi
-                        # map_choice_tag is 1-based index
-                        selected_server_subdir_val_explore="${temp_map_array[$((map_choice_tag-1))]}"
-                    else # Fallback text menu for directory selection
-                        clear
-                        echo "--- Utforsker mapper på $MD_SERVER_BASE_URL ---"
-                        local map_array_val_explore=()
-                        while IFS= read -r line; do map_array_val_explore+=("$line"); done <<< "$map_links_val_explore"
-                        local num_maps_val_explore=${#map_array_val_explore[@]}
-                        echo "Tilgjengelige mapper på server:"
-                        for i in "${!map_array_val_explore[@]}"; do echo "  $((i+1))) ${map_array_val_explore[$i]}"; done
-                        echo "  $((num_maps_val_explore+1))) Tilbake"
-                        local map_choice_val_explore_num
-                        while true; do
-                            echo -n "Velg mappe (1-$((num_maps_val_explore+1))): " >&2
-                            read -r map_choice_val_explore_num </dev/tty
-                            if [[ "$map_choice_val_explore_num" =~ ^[0-9]+$ && "$map_choice_val_explore_num" -ge 1 && "$map_choice_val_explore_num" -le "$((num_maps_val_explore+1))" ]]; then break
-                            else log_warn "Ugyldig valg."; fi
-                        done
-                        if [ "$map_choice_val_explore_num" -eq "$((num_maps_val_explore+1))" ]; then
-                            explore_outer_loop_active=false # Exit outer loop
-                            continue
-                        fi
-                        selected_server_subdir_val_explore="${map_array_val_explore[$((map_choice_val_explore_num-1))]}"
-                    fi
-
-                    script_log "DEBUG: Selected server subdir: $selected_server_subdir_val_explore"
-                    if [ -z "$selected_server_subdir_val_explore" ]; then # Should not happen if BACK/Cancel is handled
-                        explore_outer_loop_active=false
-                        continue
-                    fi
-
-                    local explore_inner_loop_active=true
-                    while $explore_inner_loop_active; do
-                        local current_server_dir_url_val_explore="${MD_SERVER_BASE_URL}${selected_server_subdir_val_explore}"
-                        local file_links_output_val_explore
-                        file_links_output_val_explore=$(md_get_links_from_url "$current_server_dir_url_val_explore")
-                        local file_links_f_val_explore
-                        file_links_f_val_explore=$(echo "$file_links_output_val_explore" | grep -v '/$')
-                        local selected_filename_val_explore=""
-
-                        if [ -z "$file_links_f_val_explore" ]; then
-                             if [ "$md_dialog_available" -eq 0 ]; then
-                                dialog --title "Filer i Mappe" --msgbox "Ingen filer funnet i servermappen '$selected_server_subdir_val_explore'." 6 70 2>/dev/tty
-                            else
-                                log_warn "Ingen filer i servermappen '$selected_server_subdir_val_explore'."
-                                press_enter_to_continue
-                            fi
-                            explore_inner_loop_active=false # Exit inner loop, back to dir selection
-                            continue
-                        fi
-
-                        if [ "$md_dialog_available" -eq 0 ]; then
-                            local dialog_file_items=()
-                            local temp_file_array=()
-                            local file_idx=1
-                            while IFS= read -r line; do
-                                dialog_file_items+=("$file_idx" "$line")
-                                temp_file_array+=("$line")
-                                file_idx=$((file_idx+1))
-                            done <<< "$file_links_f_val_explore"
-
-                            local file_choice_tag
-                            file_choice_tag=$(dialog --clear --stdout --title "Filer i $selected_server_subdir_val_explore" --menu "Velg en fil for nedlasting:" 20 76 15 "${dialog_file_items[@]}" "BACK" "Tilbake til mappevalg" 2>/dev/tty)
-                            local file_dialog_exit_status=$?
-
-                            if [ $file_dialog_exit_status -ne 0 ] || [ "$file_choice_tag" == "BACK" ]; then
-                                explore_inner_loop_active=false # Exit inner loop
-                                continue
-                            fi
-                            selected_filename_val_explore="${temp_file_array[$((file_choice_tag-1))]}"
-                        else # Fallback text menu for file selection
-                            clear
-                            echo "--- Filer i servermappe: $current_server_dir_url_val_explore ---"
-                            local file_array_f_val_explore=()
-                            if [ -n "$file_links_f_val_explore" ]; then
-                                while IFS= read -r line; do file_array_f_val_explore+=("$line"); done <<< "$file_links_f_val_explore"
-                            fi
-                            local num_files_val_explore=${#file_array_f_val_explore[@]} # Should be >0 due to check above
-                            echo "Filer på server:"
-                            for i in "${!file_array_f_val_explore[@]}"; do echo "  $((i+1))) ${file_array_f_val_explore[$i]}"; done
-                            echo "  $((num_files_val_explore+1))) Tilbake (til mappevalg)"
-                            local file_choice_val_explore_num
-                            while true; do
-                                echo -n "Velg fil for nedlasting (1-$((num_files_val_explore+1))): " >&2
-                                read -r file_choice_val_explore_num </dev/tty
-                                if [[ "$file_choice_val_explore_num" =~ ^[0-9]+$ && "$file_choice_val_explore_num" -ge 1 && "$file_choice_val_explore_num" -le "$((num_files_val_explore+1))" ]]; then break
-                                else log_warn "Ugyldig valg."; fi
-                            done
-                            if [ "$file_choice_val_explore_num" -eq "$((num_files_val_explore+1))" ]; then
-                                explore_inner_loop_active=false # Exit inner loop
-                                continue
-                            fi
-                            selected_filename_val_explore="${file_array_f_val_explore[$((file_choice_val_explore_num-1))]}"
-                        fi
-
-                        script_log "DEBUG: Selected file for download: $selected_filename_val_explore"
-                        if [ -z "$selected_filename_val_explore" ]; then # Should not happen
-                            explore_inner_loop_active=false
-                            continue
-                        fi
-
-                        local source_url_f_val_explore="$current_server_dir_url_val_explore$selected_filename_val_explore"
-                        local target_path_f_val_explore="$MD_COMFYUI_BASE_MODELS_PATH/$selected_server_subdir_val_explore$selected_filename_val_explore"
-                        local do_download=true
-
-                        if [ -f "$target_path_f_val_explore" ]; then
-                            if [ "$md_dialog_available" -eq 0 ]; then
-                                if ! dialog --title "Bekreft Overskriving" --yesno "Filen '$selected_filename_val_explore' finnes allerede lokalt.\nSti: $target_path_f_val_explore\n\nOverskriv?" 10 70 2>/dev/tty; then
-                                    log_info "Skipper nedlasting av '$selected_filename_val_explore'."
-                                    do_download=false
-                                fi
-                            else
-                                log_warn "Fil '$selected_filename_val_explore' finnes allerede lokalt."
-                                local ovw_f_explore
-                                echo -n "Overskriv? (ja/nei): " >&2; read -r ovw_f_explore </dev/tty
-                                if [[ ! "$ovw_f_explore" =~ ^[Jj]$ ]]; then
-                                    log_info "Skipper nedlasting."; do_download=false
-                                fi
-                            fi
-                        fi
-
-                        if $do_download; then
-                            md_download_file "$source_url_f_val_explore" "$target_path_f_val_explore"
-                        fi
-
-                        local download_another_file_choice=true
-                        if [ "$md_dialog_available" -eq 0 ]; then
-                            if ! dialog --title "Fortsett?" --yesno "Last ned en annen fil fra '$selected_server_subdir_val_explore'?" 7 70 2>/dev/tty; then
-                                download_another_file_choice=false
-                            fi
-                        else
-                            local another_f_val_explore
-                            echo -n "Last ned en annen fil fra '$selected_server_subdir_val_explore'? (Ja/nei) [J]: " >&2
-                            read -r another_f_val_explore </dev/tty; another_f_val_explore=${another_f_val_explore:-J}
-                            if [[ "$another_f_val_explore" =~ ^[Nn]$ ]]; then download_another_file_choice=false; fi
-                        fi
-                        if ! $download_another_file_choice; then explore_inner_loop_active=false; fi # Exit inner loop
-                    done # End inner file loop (explore_inner_loop_active)
-
-                    local explore_another_map_choice=true
-                    if [ "$md_dialog_available" -eq 0 ]; then
-                         if ! dialog --title "Fortsett Utforsking?" --yesno "Vil du utforske en annen mappe på serveren?" 7 70 2>/dev/tty; then
-                            explore_another_map_choice=false
                         fi
                     else
-                        local another_m_val_explore
-                        echo -n "Velg en annen mappe for å utforske? (Ja/nei) [J]: " >&2
-                        read -r another_m_val_explore </dev/tty; another_m_val_explore=${another_m_val_explore:-J}
-                        if [[ "$another_m_val_explore" =~ ^[Nn]$ ]]; then explore_another_map_choice=false; fi
+                         clear
+                         echo "--- Utforsk: /${current_relative_path} ---"
+                         local i=0
+                         for name in "${item_map[@]}"; do
+                             i=$((i+1))
+                             local display_name="$name"
+                             if [ "$name" == ".." ]; then display_name=".. (Gå opp)"; fi
+                             echo "$i) $display_name"
+                         done
+                         echo "$((i+1))) Avslutt utforsking"
+
+                         echo -n "Velg (1-$((i+1))): "
+                         read -r selection_idx </dev/tty
+                         if [ "$selection_idx" -eq $((i+1)) ]; then
+                             explore_active=false
+                             continue
+                         fi
                     fi
-                    if ! $explore_another_map_choice; then explore_outer_loop_active=false; fi # Exit outer loop
-                done # End outer directory loop (explore_outer_loop_active)
-                press_enter_to_continue # After exiting the explore loops
+
+                    if [[ "$selection_idx" =~ ^[0-9]+$ ]] && [ "$selection_idx" -ge 1 ] && [ "$selection_idx" -le ${#item_map[@]} ]; then
+                        selection_name="${item_map[$((selection_idx-1))]}"
+                    else
+                        log_warn "Ugyldig valg."
+                        press_enter_to_continue
+                        continue
+                    fi
+
+                    if [ "$selection_name" == ".." ]; then
+                        local tmp="${current_relative_path%/}"
+                        local parent="$(dirname "$tmp")"
+                        if [ "$parent" == "." ] || [ "$parent" == "/" ]; then
+                            current_relative_path=""
+                        else
+                            current_relative_path="$parent/"
+                        fi
+
+                    elif [[ "$selection_name" == */ ]]; then
+                         if [ "$md_dialog_available" -eq 0 ]; then
+                             local dir_action
+                             dir_action=$(dialog --clear --stdout --title "Mappe: $selection_name" \
+                                --menu "Hva vil du gjøre med denne mappen?" 12 60 5 \
+                                "1" "Gå inn i mappen (Browse)" \
+                                "2" "Last ned hele mappen (Rekursivt)" \
+                                2>/dev/tty)
+                             if [ "$?" -ne 0 ]; then continue; fi
+
+                             if [ "$dir_action" == "1" ]; then
+                                 current_relative_path="${current_relative_path}${selection_name}"
+                             elif [ "$dir_action" == "2" ]; then
+                                 local dl_source="${current_url}${selection_name}"
+                                 local dl_target="${MD_COMFYUI_BASE_MODELS_PATH}/${current_relative_path}${selection_name}"
+                                 dl_target="${dl_target%/}"
+
+                                 md_download_folder_recursive "$dl_source" "$dl_target"
+                                 log_success "Mappe lastet ned."
+                                 press_enter_to_continue
+                             fi
+                         else
+                             echo "Mappe: $selection_name"
+                             echo "1) Gå inn i mappen (Browse)"
+                             echo "2) Last ned hele mappen (Rekursivt)"
+                             echo "3) Avbryt"
+                             echo -n "Velg: "
+                             local dir_action
+                             read -r dir_action </dev/tty
+                             if [ "$dir_action" == "1" ]; then
+                                 current_relative_path="${current_relative_path}${selection_name}"
+                             elif [ "$dir_action" == "2" ]; then
+                                 local dl_source="${current_url}${selection_name}"
+                                 local dl_target="${MD_COMFYUI_BASE_MODELS_PATH}/${current_relative_path}${selection_name}"
+                                 dl_target="${dl_target%/}"
+                                 md_download_folder_recursive "$dl_source" "$dl_target"
+                                 log_success "Mappe lastet ned."
+                                 press_enter_to_continue
+                             fi
+                         fi
+                    else
+                        local f_source="${current_url}${selection_name}"
+                        local f_target="${MD_COMFYUI_BASE_MODELS_PATH}/${current_relative_path}${selection_name}"
+
+                        local do_dl=true
+                        if [ -f "$f_target" ]; then
+                             local overwrite=true
+                             if [ "$md_dialog_available" -eq 0 ]; then
+                                 if ! dialog --yesno "Filen finnes allerede:\n$f_target\n\nOverskriv?" 10 60 2>/dev/tty; then
+                                     overwrite=false
+                                 fi
+                             else
+                                 echo "Filen finnes: $f_target"
+                                 echo -n "Overskriv? (j/n): "
+                                 local ov
+                                 read -r ov </dev/tty
+                                 if [[ ! "$ov" =~ ^[Jj] ]]; then overwrite=false; fi
+                             fi
+                             if ! $overwrite; then do_dl=false; fi
+                        fi
+
+                        if $do_dl; then
+                            md_download_file "$f_source" "$f_target"
+                            press_enter_to_continue
+                        fi
+                    fi
+
+                done
                 ;;
             2) # Last ned alle manglende
                 if [ "$md_dialog_available" -ne 0 ]; then clear; fi
